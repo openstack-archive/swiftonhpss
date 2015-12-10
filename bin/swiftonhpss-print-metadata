@@ -19,7 +19,7 @@ import pprint
 import os
 import json
 from optparse import OptionParser
-from swiftonfile.swift.common.utils import read_metadata
+from swiftonhpss.swift.common.utils import read_metadata
 
 # Parser Setup
 USAGE = "Usage: %prog [options] OBJECT"

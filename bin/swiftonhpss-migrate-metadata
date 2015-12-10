@@ -25,7 +25,7 @@ import cPickle as pickle
 import multiprocessing
 
 from optparse import OptionParser
-from swiftonfile.swift.common.utils import write_metadata, SafeUnpickler, \
+from swiftonhpss.swift.common.utils import write_metadata, SafeUnpickler, \
     METADATA_KEY, MAX_XATTR_SIZE
 
 

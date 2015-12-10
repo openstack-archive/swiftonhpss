@@ -1,5 +1,8 @@
 # Developer Guide
 
+This guide is for SwiftOnFile development. IBM does not actually have a Jenkins
+or Gerrit set up yet for SwiftOnHPSS.
+
 ## Development Environment Setup
 The workflow for SwiftOnFile is largely based upon the [OpenStack Gerrit Workflow][].
 

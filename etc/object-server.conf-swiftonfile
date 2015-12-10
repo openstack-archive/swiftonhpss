@@ -32,7 +32,7 @@ workers = 1
 pipeline = object-server
 
 [app:object-server]
-use = egg:swiftonfile#object
+use = egg:swiftonhpss#object
 user = <your-user-name>
 log_facility = LOG_LOCAL2
 log_level = WARN

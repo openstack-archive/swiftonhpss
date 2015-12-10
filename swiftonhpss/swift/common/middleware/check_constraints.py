@@ -16,10 +16,10 @@
 """
 The ``sof_constraints`` middleware should be added to the pipeline in your
 ``/etc/swift/proxy-server.conf`` file, and a mapping of storage policies
-using the swiftonfile object server should be listed in the 'policies'
+using the swiftonhpss object server should be listed in the 'policies'
 variable in the filter section.
 
-The swiftonfile constraints contains additional checks to make sure object
+The swiftonhpss constraints contains additional checks to make sure object
 names conform with POSIX filesystems file and directory naming limitations
 
 For example::
@@ -28,8 +28,8 @@ For example::
     pipeline = catch_errors sof_constraints cache proxy-server
 
     [filter:sof_constraints]
-    use = egg:swiftonfile#sof_constraints
-    policies=swiftonfile,gold
+    use = egg:swiftonhpss#sof_constraints
+    policies=swiftonhpss,gold
 """
 
 from urllib import unquote
@@ -37,8 +37,8 @@ from swift.common.utils import get_logger
 from swift.common.swob import Request, HTTPBadRequest
 from swift.proxy.controllers.base import get_container_info
 from swift.common.storage_policy import POLICIES
-from swiftonfile.swift.common import constraints
-from swiftonfile.swift.common.constraints import check_object_creation \
+from swiftonhpss.swift.common import constraints
+from swiftonhpss.swift.common.constraints import check_object_creation \
     as sof_check_object_creation
 
 

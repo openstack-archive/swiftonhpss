@@ -101,7 +101,7 @@ class TestAccountEnv(object):
         cls.containers = []
         for i in range(10):
             cont = cls.account.container(Utils.create_name())
-            if not cont.create():
+            if not cont.create(None, None):
                 raise ResponseError(cls.conn.response)
 
             cls.containers.append(cont)
@@ -132,7 +132,7 @@ class TestAccount(Base):
     def testInvalidUTF8Path(self):
         invalid_utf8 = Utils.create_utf8_name()[::-1]
         container = self.env.account.container(invalid_utf8)
-        self.assert_(not container.create(cfg={'no_path_quote': True}))
+        self.assert_(not container.create(None, None))
         self.assert_status(412)
         self.assert_body('Invalid UTF8 or contains NULL')
 
@@ -337,7 +337,7 @@ class TestContainerEnv(object):
         cls.account.delete_containers()
 
         cls.container = cls.account.container(Utils.create_name())
-        if not cls.container.create():
+        if not cls.container.create(None, None):
             raise ResponseError(cls.conn.response)
 
         cls.file_count = 10
@@ -372,15 +372,15 @@ class TestContainer(Base):
                   limit + 1, limit + 10, limit + 100):
             cont = self.env.account.container('a' * l)
             if l <= limit:
-                self.assert_(cont.create())
+                self.assert_(cont.create(None, None))
                 self.assert_status(201)
             else:
-                self.assert_(not cont.create())
+                self.assert_(not cont.create(None, None))
                 self.assert_status(400)
 
     def testFileThenContainerDelete(self):
         cont = self.env.account.container(Utils.create_name())
-        self.assert_(cont.create())
+        self.assert_(cont.create(None, None))
         file_item = cont.file(Utils.create_name())
         self.assert_(file_item.write_random())
 
@@ -394,7 +394,7 @@ class TestContainer(Base):
 
     def testFileListingLimitMarkerPrefix(self):
         cont = self.env.account.container(Utils.create_name())
-        self.assert_(cont.create())
+        self.assert_(cont.create(None, None))
 
         files = sorted([Utils.create_name() for x in xrange(10)])
         for f in files:
@@ -413,7 +413,7 @@ class TestContainer(Base):
     def testPrefixAndLimit(self):
         load_constraint('container_listing_limit')
         cont = self.env.account.container(Utils.create_name())
-        self.assert_(cont.create())
+        self.assert_(cont.create(None, None))
 
         prefix_file_count = 10
         limit_count = 2
@@ -444,7 +444,7 @@ class TestContainer(Base):
 
     def testCreate(self):
         cont = self.env.account.container(Utils.create_name())
-        self.assert_(cont.create())
+        self.assert_(cont.create(None, None))
         self.assert_status(201)
         self.assert_(cont.name in self.env.account.containers())
 
@@ -459,13 +459,13 @@ class TestContainer(Base):
         valid_utf8 = Utils.create_utf8_name()
         invalid_utf8 = valid_utf8[::-1]
         container = self.env.account.container(valid_utf8)
-        self.assert_(container.create(cfg={'no_path_quote': True}))
+        self.assert_(container.create(None, None))
         self.assert_(container.name in self.env.account.containers())
         self.assertEqual(container.files(), [])
         self.assert_(container.delete())
 
         container = self.env.account.container(invalid_utf8)
-        self.assert_(not container.create(cfg={'no_path_quote': True}))
+        self.assert_(not container.create(None, None))
         self.assert_status(412)
         self.assertRaises(ResponseError, container.files,
                           cfg={'no_path_quote': True})
@@ -473,9 +473,9 @@ class TestContainer(Base):
 
     def testCreateOnExisting(self):
         cont = self.env.account.container(Utils.create_name())
-        self.assert_(cont.create())
+        self.assert_(cont.create(None, None))
         self.assert_status(201)
-        self.assert_(cont.create())
+        self.assert_(cont.create(None, None))
         self.assert_status(202)
 
     def testSlashInName(self):
@@ -491,14 +491,14 @@ class TestContainer(Base):
             cont_name = cont_name.encode('utf-8')
 
         cont = self.env.account.container(cont_name)
-        self.assert_(not cont.create(cfg={'no_path_quote': True}),
+        self.assert_(not cont.create(None, None),
                      'created container with name %s' % (cont_name))
         self.assert_status(404)
         self.assert_(cont.name not in self.env.account.containers())
 
     def testDelete(self):
         cont = self.env.account.container(Utils.create_name())
-        self.assert_(cont.create())
+        self.assert_(cont.create(None, None))
         self.assert_status(201)
         self.assert_(cont.delete())
         self.assert_status(204)
@@ -511,7 +511,7 @@ class TestContainer(Base):
 
     def testDeleteOnContainerWithFiles(self):
         cont = self.env.account.container(Utils.create_name())
-        self.assert_(cont.create())
+        self.assert_(cont.create(None, None))
         file_item = cont.file(Utils.create_name())
         file_item.write_random(self.env.file_size)
         self.assert_(file_item.name in cont.files())
@@ -600,19 +600,19 @@ class TestContainer(Base):
 
     def testTooLongName(self):
         cont = self.env.account.container('x' * 257)
-        self.assert_(not cont.create(),
+        self.assert_(not cont.create(None, None),
                      'created container with name %s' % (cont.name))
         self.assert_status(400)
 
     def testContainerExistenceCachingProblem(self):
         cont = self.env.account.container(Utils.create_name())
         self.assertRaises(ResponseError, cont.files)
-        self.assert_(cont.create())
+        self.assert_(cont.create(None, None))
         cont.files()
 
         cont = self.env.account.container(Utils.create_name())
         self.assertRaises(ResponseError, cont.files)
-        self.assert_(cont.create())
+        self.assert_(cont.create(None, None))
         file_item = cont.file(Utils.create_name())
         file_item.write_random()
 
@@ -634,7 +634,7 @@ class TestContainerPathsEnv(object):
         cls.file_size = 8
 
         cls.container = cls.account.container(Utils.create_name())
-        if not cls.container.create():
+        if not cls.container.create(None, None):
             raise ResponseError(cls.conn.response)
 
         cls.files = [
@@ -824,7 +824,7 @@ class TestFileEnv(object):
         cls.account2.delete_containers()
 
         cls.container = cls.account.container(Utils.create_name())
-        if not cls.container.create():
+        if not cls.container.create(None, None):
             raise ResponseError(cls.conn.response)
 
         cls.file_size = 128
@@ -856,7 +856,7 @@ class TestFile(Base):
         file_item.sync_metadata(metadata)
 
         dest_cont = self.env.account.container(Utils.create_name())
-        self.assert_(dest_cont.create())
+        self.assert_(dest_cont.create(None, None))
 
         # copy both from within and across containers
         for cont in (self.env.container, dest_cont):
@@ -886,7 +886,7 @@ class TestFile(Base):
         file_item.sync_metadata(metadata)
 
         dest_cont = self.env.account.container(Utils.create_name())
-        self.assert_(dest_cont.create())
+        self.assert_(dest_cont.create(None, None))
 
         acct = self.env.conn.account_name
         # copy both from within and across containers
@@ -909,9 +909,7 @@ class TestFile(Base):
                 self.assert_(metadata == file_item.metadata)
 
         dest_cont = self.env.account2.container(Utils.create_name())
-        self.assert_(dest_cont.create(hdrs={
-            'X-Container-Write': self.env.conn.user_acl
-        }))
+        self.assert_(dest_cont.create(None, None))
 
         acct = self.env.conn2.account_name
         # copy both with and without initial slash
@@ -937,7 +935,7 @@ class TestFile(Base):
         file_item.write_random()
 
         dest_cont = self.env.account.container(Utils.create_name())
-        self.assert_(dest_cont.create())
+        self.assert_(dest_cont.create(None, None))
 
         for prefix in ('', '/'):
             # invalid source container
@@ -977,14 +975,9 @@ class TestFile(Base):
         file_item.write_random()
 
         dest_cont = self.env.account.container(Utils.create_name())
-        self.assert_(dest_cont.create(hdrs={
-            'X-Container-Read': self.env.conn2.user_acl
-        }))
+        self.assert_(dest_cont.create(None, None))
         dest_cont2 = self.env.account2.container(Utils.create_name())
-        self.assert_(dest_cont2.create(hdrs={
-            'X-Container-Write': self.env.conn.user_acl,
-            'X-Container-Read': self.env.conn.user_acl
-        }))
+        self.assert_(dest_cont2.create(None, None))
 
         for acct, cont in ((acct, dest_cont), (acct2, dest_cont2)):
             for prefix in ('', '/'):
@@ -1074,7 +1067,7 @@ class TestFile(Base):
         data = file_item.write_random()
 
         dest_cont = self.env.account.container(Utils.create_name())
-        self.assert_(dest_cont.create())
+        self.assert_(dest_cont.create(None, None))
 
         # copy both from within and across containers
         for cont in (self.env.container, dest_cont):
@@ -1097,9 +1090,7 @@ class TestFile(Base):
     def testCopyFromAccountHeader(self):
         acct = self.env.conn.account_name
         src_cont = self.env.account.container(Utils.create_name())
-        self.assert_(src_cont.create(hdrs={
-            'X-Container-Read': self.env.conn2.user_acl
-        }))
+        self.assert_(src_cont.create(None, None))
         source_filename = Utils.create_name()
         file_item = src_cont.file(source_filename)
 
@@ -1111,11 +1102,9 @@ class TestFile(Base):
         data = file_item.write_random()
 
         dest_cont = self.env.account.container(Utils.create_name())
-        self.assert_(dest_cont.create())
+        self.assert_(dest_cont.create(None, None))
         dest_cont2 = self.env.account2.container(Utils.create_name())
-        self.assert_(dest_cont2.create(hdrs={
-            'X-Container-Write': self.env.conn.user_acl
-        }))
+        self.assert_(dest_cont2.create(None, None))
 
         for cont in (src_cont, dest_cont, dest_cont2):
             # copy both with and without initial slash
@@ -1171,14 +1160,12 @@ class TestFile(Base):
     def testCopyFromAccountHeader404s(self):
         acct = self.env.conn2.account_name
         src_cont = self.env.account2.container(Utils.create_name())
-        self.assert_(src_cont.create(hdrs={
-            'X-Container-Read': self.env.conn.user_acl
-        }))
+        self.assert_(src_cont.create(None, None))
         source_filename = Utils.create_name()
         file_item = src_cont.file(source_filename)
         file_item.write_random()
         dest_cont = self.env.account.container(Utils.create_name())
-        self.assert_(dest_cont.create())
+        self.assert_(dest_cont.create(None, None))
 
         for prefix in ('', '/'):
             # invalid source container
@@ -1317,7 +1304,7 @@ class TestFile(Base):
                       'zip': 'application/zip'}
 
         container = self.env.account.container(Utils.create_name())
-        self.assert_(container.create())
+        self.assert_(container.create(None, None))
 
         for i in file_types.keys():
             file_item = container.file(Utils.create_name() + '.' + i)
@@ -1628,7 +1615,7 @@ class TestFile(Base):
 
     def testSerialization(self):
         container = self.env.account.container(Utils.create_name())
-        self.assert_(container.create())
+        self.assert_(container.create(None, None))
 
         files = []
         for i in (0, 1, 10, 100, 1000, 10000):
@@ -1766,7 +1753,7 @@ class TestDloEnv(object):
 
         cls.container = cls.account.container(Utils.create_name())
 
-        if not cls.container.create():
+        if not cls.container.create(None, None):
             raise ResponseError(cls.conn.response)
 
         # avoid getting a prefix that stops halfway through an encoded
@@ -1973,7 +1960,7 @@ class TestFileComparisonEnv(object):
 
         cls.container = cls.account.container(Utils.create_name())
 
-        if not cls.container.create():
+        if not cls.container.create(None, None):
             raise ResponseError(cls.conn.response)
 
         cls.file_count = 20
@@ -2110,7 +2097,7 @@ class TestSloEnv(object):
 
         cls.container = cls.account.container(Utils.create_name())
 
-        if not cls.container.create():
+        if not cls.container.create(None, None):
             raise ResponseError(cls.conn.response)
 
         seg_info = {}
@@ -2293,9 +2280,7 @@ class TestSlo(Base):
         # copy to different account
         acct = self.env.conn2.account_name
         dest_cont = self.env.account2.container(Utils.create_name())
-        self.assert_(dest_cont.create(hdrs={
-            'X-Container-Write': self.env.conn.user_acl
-        }))
+        self.assert_(dest_cont.create(None, None))
         file_item = self.env.container.file("manifest-abcde")
         file_item.copy_account(acct, dest_cont, "copied-abcde")
 
@@ -2334,9 +2319,7 @@ class TestSlo(Base):
         # different account
         acct = self.env.conn2.account_name
         dest_cont = self.env.account2.container(Utils.create_name())
-        self.assert_(dest_cont.create(hdrs={
-            'X-Container-Write': self.env.conn.user_acl
-        }))
+        self.assert_(dest_cont.create(None, None))
         file_item.copy_account(acct,
                                dest_cont,
                                "copied-abcde-manifest-only",
@@ -2440,12 +2423,11 @@ class TestObjectVersioningEnv(object):
         prefix = Utils.create_name().decode("utf-8")[:10].encode("utf-8")
 
         cls.versions_container = cls.account.container(prefix + "-versions")
-        if not cls.versions_container.create():
+        if not cls.versions_container.create(None, None):
             raise ResponseError(cls.conn.response)
 
         cls.container = cls.account.container(prefix + "-objs")
-        if not cls.container.create(
-                hdrs={'X-Versions-Location': cls.versions_container.name}):
+        if not cls.container.create(None, None):
             raise ResponseError(cls.conn.response)
 
         container_info = cls.container.info()
@@ -2502,13 +2484,11 @@ class TestCrossPolicyObjectVersioningEnv(object):
 
         cls.versions_container = cls.account.container(prefix + "-versions")
         if not cls.versions_container.create(
-                {'X-Storage-Policy': policy['name']}):
+                {'X-Storage-Policy': policy['name']}, None):
             raise ResponseError(cls.conn.response)
 
         cls.container = cls.account.container(prefix + "-objs")
-        if not cls.container.create(
-                hdrs={'X-Versions-Location': cls.versions_container.name,
-                      'X-Storage-Policy': version_policy['name']}):
+        if not cls.container.create(None, None):
             raise ResponseError(cls.conn.response)
 
         container_info = cls.container.info()
@@ -2621,7 +2601,7 @@ class TestObjectVersioning(Base):
     def test_versioning_check_acl(self):
         container = self.env.container
         versions_container = self.env.versions_container
-        versions_container.create(hdrs={'X-Container-Read': '.r:*,.rlistings'})
+        versions_container.create(None, None)
 
         obj_name = Utils.create_name()
         versioned_obj = container.file(obj_name)
@@ -2690,7 +2670,7 @@ class TestTempurlEnv(object):
         })
 
         cls.container = cls.account.container(Utils.create_name())
-        if not cls.container.create():
+        if not cls.container.create(None, None):
             raise ResponseError(cls.conn.response)
 
         cls.obj = cls.container.file(Utils.create_name())
@@ -2872,9 +2852,9 @@ class TestContainerTempurlEnv(object):
 
         cls.container = cls.account.container(Utils.create_name())
         if not cls.container.create({
-                'x-container-meta-temp-url-key': cls.tempurl_key,
-                'x-container-meta-temp-url-key-2': cls.tempurl_key2,
-                'x-container-read': cls.account2.name}):
+            'x-container-meta-temp-url-key': cls.tempurl_key,
+            'x-container-meta-temp-url-key-2': cls.tempurl_key2,
+            'x-container-read': cls.account2.name}, None):
             raise ResponseError(cls.conn.response)
 
         cls.obj = cls.container.file(Utils.create_name())
@@ -3064,9 +3044,9 @@ class TestSloTempurlEnv(object):
 
         cls.manifest_container = cls.account.container(Utils.create_name())
         cls.segments_container = cls.account.container(Utils.create_name())
-        if not cls.manifest_container.create():
+        if not cls.manifest_container.create(None, None):
             raise ResponseError(cls.conn.response)
-        if not cls.segments_container.create():
+        if not cls.segments_container.create(None, None):
             raise ResponseError(cls.conn.response)
 
         seg1 = cls.segments_container.file(Utils.create_name())

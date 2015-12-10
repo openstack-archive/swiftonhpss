@@ -23,10 +23,11 @@ except ImportError:
     import random
 import logging
 import time
+import hpssfs
 from uuid import uuid4
 from eventlet import sleep
 from contextlib import contextmanager
-from swiftonfile.swift.common.exceptions import AlreadyExistsAsFile, \
+from swiftonhpss.swift.common.exceptions import AlreadyExistsAsFile, \
     AlreadyExistsAsDir
 from swift.common.utils import ThreadPool, hash_path, \
     normalize_timestamp, fallocate
@@ -35,14 +36,15 @@ from swift.common.exceptions import DiskFileNotExist, DiskFileError, \
     DiskFileExpired
 from swift.common.swob import multi_range_iterator
 
-from swiftonfile.swift.common.exceptions import SwiftOnFileSystemOSError
-from swiftonfile.swift.common.fs_utils import do_fstat, do_open, do_close, \
+from swiftonhpss.swift.common.exceptions import SwiftOnFileSystemOSError, \
+    SwiftOnFileSystemIOError
+from swiftonhpss.swift.common.fs_utils import do_fstat, do_open, do_close, \
     do_unlink, do_chown, do_fsync, do_fchown, do_stat, do_write, do_read, \
     do_fadvise64, do_rename, do_fdatasync, do_lseek, do_mkdir
-from swiftonfile.swift.common.utils import read_metadata, write_metadata, \
+from swiftonhpss.swift.common.utils import read_metadata, write_metadata, \
     validate_object, create_object_metadata, rmobjdir, dir_is_object, \
     get_object_metadata, write_pickle
-from swiftonfile.swift.common.utils import X_CONTENT_TYPE, \
+from swiftonhpss.swift.common.utils import X_CONTENT_TYPE, \
     X_TIMESTAMP, X_TYPE, X_OBJECT_TYPE, FILE, OBJECT, DIR_TYPE, \
     FILE_TYPE, DEFAULT_UID, DEFAULT_GID, DIR_NON_OBJECT, DIR_OBJECT, \
     X_ETAG, X_CONTENT_LENGTH, X_MTIME
@@ -228,7 +230,7 @@ class DiskFileManager(SwiftDiskFileManager):
 
     def pickle_async_update(self, device, account, container, obj, data,
                             timestamp, policy):
-        # This method invokes swiftonfile's writepickle method.
+        # This method invokes swiftonhpss's writepickle method.
         # Is patching just write_pickle and calling parent method better ?
         device_path = self.construct_dev_path(device)
         async_dir = os.path.join(device_path, get_async_dir(policy))
@@ -295,7 +297,7 @@ class DiskFileWriter(object):
         df._threadpool.run_in_thread(self._write_entire_chunk, chunk)
         return self._upload_size
 
-    def _finalize_put(self, metadata):
+    def _finalize_put(self, metadata, purgelock=False):
         # Write out metadata before fsync() to ensure it is also forced to
         # disk.
         write_metadata(self._fd, metadata)
@@ -305,6 +307,16 @@ class DiskFileWriter(object):
         # the pages (now that after fsync the pages will be all
         # clean).
         do_fsync(self._fd)
+
+        # (HPSS) Purge lock the file now if we're asked to.
+        if purgelock:
+            try:
+                hpssfs.ioctl(self._fd, hpssfs.HPSSFS_PURGE_LOCK, int(purgelock))
+            except IOError as err:
+                raise SwiftOnFileSystemIOError(err.errno,
+                                               '%s, hpssfs.ioct("%s", ...)' % (
+                                               err.strerror, self._fd))
+
         # From the Department of the Redundancy Department, make sure
         # we call drop_cache() after fsync() to avoid redundant work
         # (pages all clean).
@@ -381,12 +393,13 @@ class DiskFileWriter(object):
         # in a thread.
         self.close()
 
-    def put(self, metadata):
+    def put(self, metadata, purgelock):
         """
         Finalize writing the file on disk, and renames it from the temp file
         to the real location.  This should be called after the data has been
         written to the temp file.
 
+        :param purgelock: bool flag to signal if purge lock desired
         :param metadata: dictionary of metadata to be written
         :raises AlreadyExistsAsDir : If there exists a directory of the same
                                      name
@@ -409,7 +422,8 @@ class DiskFileWriter(object):
                                      ' since the target, %s, already exists'
                                      ' as a directory' % df._data_file)
 
-        df._threadpool.force_run_in_thread(self._finalize_put, metadata)
+        df._threadpool.force_run_in_thread(self._finalize_put, metadata,
+                                           purgelock)
 
         # Avoid the unlink() system call as part of the mkstemp context
         # cleanup
@@ -555,7 +569,7 @@ class DiskFile(object):
     Object names ending or beginning with a '/' as in /a, a/, /a/b/,
     etc, or object names with multiple consecutive slashes, like a//b,
     are not supported.  The proxy server's constraints filter
-    swiftonfile.common.constrains.check_object_creation() should
+    swiftonhpss.common.constrains.check_object_creation() should
     reject such requests.
 
     :param mgr: associated on-disk manager instance
@@ -829,7 +843,7 @@ class DiskFile(object):
         return True, newmd
 
     @contextmanager
-    def create(self, size=None):
+    def create(self, size, cos):
         """
         Context manager to create a file. We create a temporary file first, and
         then return a DiskFileWriter object to encapsulate the state.
@@ -840,6 +854,7 @@ class DiskFile(object):
         temporary file again. If we get file name conflict, we'll retry using
         different random suffixes 1,000 times before giving up.
 
+        :param cos:
         .. note::
 
             An implementation is not required to perform on-disk
@@ -873,6 +888,23 @@ class DiskFile(object):
             try:
                 fd = do_open(tmppath,
                              os.O_WRONLY | os.O_CREAT | os.O_EXCL | O_CLOEXEC)
+
+                if cos:
+                    try:
+                        hpssfs.ioctl(fd, hpssfs.HPSSFS_SET_COS_HINT, int(cos))
+                    except IOError as err:
+                        raise SwiftOnFileSystemIOError(err.errno,
+                                                       '%s, hpssfs.ioctl("%s", SET_COS)' % (
+                                                       err.strerror, fd))
+                elif size:
+                    try:
+                        hpssfs.ioctl(fd, hpssfs.HPSSFS_SET_FSIZE_HINT,
+                                     long(size))
+                    except IOError as err:
+                        raise SwiftOnFileSystemIOError(err.errno,
+                                                       '%s, hpssfs.ioctl("%s", SET_FSIZE)' % (
+                                                       err.strerror, fd))
+
             except SwiftOnFileSystemOSError as gerr:
                 if gerr.errno in (errno.ENOSPC, errno.EDQUOT):
                     # Raise DiskFileNoSpace to be handled by upper layers when

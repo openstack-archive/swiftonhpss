@@ -9,7 +9,7 @@ Name     : %{_name}
 Version  : %{_version}
 Release  : %{_release}%{?dist}
 Group    : Applications/System
-URL      : https://github.com/openstack/swiftonfile
+URL      : https://github.com/hpss-collaboration/swiftonhpss
 Source0  : %{_name}-%{_version}-%{_release}.tar.gz
 License  : ASL 2.0
 BuildArch: noarch
@@ -20,10 +20,10 @@ Requires : python-setuptools
 Requires : openstack-swift-object = 2.3.0
 
 %description
-SwiftOnFile is a Swift Object Server implementation that enables users to
+SwiftOnHPSS is a Swift Object Server implementation that enables users to
 access the same data, both as an object and as a file. Data can be stored
-and retrieved through Swift's REST interface or as files from NAS interfaces
-including native GlusterFS, GPFS, NFS and CIFS.
+and retrieved through Swift's REST interface or as files from your site's HPSS
+archive system.
 
 %prep
 %setup -q -n swiftonfile-%{_version}
@@ -58,6 +58,9 @@ cp -r etc/*   %{buildroot}/%{_confdir}/
 rm -rf %{buildroot}
 
 %changelog
+* Thu Dec 10 2015 Phil Bridges <pgbridge@us.ibm.com>
+- Fork SwiftOnFile into SwiftOnHPSS, add HPSS-specific features
+
 * Wed Jul 15 2015 Prashanth Pai <ppai@redhat.com> - 2.3.0-0
 - Update spec file to support Kilo release of Swift
 

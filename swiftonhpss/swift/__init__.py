@@ -13,7 +13,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-""" SwiftOnFile """
+""" SwiftOnHPSS """
 
 
 class PkgInfo(object):
@@ -43,6 +43,9 @@ class PkgInfo(object):
 
 
 # Change the Package version here
-_pkginfo = PkgInfo('2.3.0', '0', 'swiftonfile', False)
+_pkginfo = PkgInfo(canonical_version='2.3.0',
+                   release='0',
+                   name='swiftonhpss',
+                   final=False)
 __version__ = _pkginfo.pretty_version
 __canonical_version__ = _pkginfo.canonical_version

@@ -27,10 +27,10 @@ import shutil
 import cPickle as pickle
 from collections import defaultdict
 from mock import patch, Mock
-from swiftonfile.swift.common import utils
-from swiftonfile.swift.common.utils import deserialize_metadata, \
+from swiftonhpss.swift.common import utils
+from swiftonhpss.swift.common.utils import deserialize_metadata, \
     serialize_metadata, PICKLE_PROTOCOL
-from swiftonfile.swift.common.exceptions import SwiftOnFileSystemOSError, \
+from swiftonhpss.swift.common.exceptions import SwiftOnFileSystemOSError, \
     SwiftOnFileSystemIOError
 from swift.common.exceptions import DiskFileNoSpace
 
@@ -352,7 +352,7 @@ class TestUtils(unittest.TestCase):
         pickled_md = pickle.dumps(orig_md, PICKLE_PROTOCOL)
         _m_pickle_loads = Mock(return_value={})
         utils.read_pickled_metadata = True
-        with patch('swiftonfile.swift.common.utils.pickle.loads',
+        with patch('swiftonhpss.swift.common.utils.pickle.loads',
                    _m_pickle_loads):
             # pickled
             md = utils.deserialize_metadata(pickled_md)
@@ -375,7 +375,7 @@ class TestUtils(unittest.TestCase):
 
     def test_deserialize_metadata_json(self):
         _m_json_loads = Mock(return_value={})
-        with patch('swiftonfile.swift.common.utils.json.loads',
+        with patch('swiftonhpss.swift.common.utils.json.loads',
                    _m_json_loads):
             utils.deserialize_metadata("not_json")
             self.assertFalse(_m_json_loads.called)
@@ -538,7 +538,7 @@ class TestUtils(unittest.TestCase):
         try:
             fpp = os.path.join(td, 'pp')
             # FIXME: Remove this patch when coverage.py can handle eventlet
-            with patch("swiftonfile.swift.common.fs_utils.do_fsync",
+            with patch("swiftonhpss.swift.common.fs_utils.do_fsync",
                        _mock_os_fsync):
                 utils.write_pickle('pickled peppers', fpp)
             with open(fpp, "rb") as f:
@@ -555,7 +555,7 @@ class TestUtils(unittest.TestCase):
             fpp = os.path.join(td, 'pp')
             # Also test an explicity pickle protocol
             # FIXME: Remove this patch when coverage.py can handle eventlet
-            with patch("swiftonfile.swift.common.fs_utils.do_fsync",
+            with patch("swiftonhpss.swift.common.fs_utils.do_fsync",
                        _mock_os_fsync):
                 utils.write_pickle('pickled peppers', fpp, tmp=tf.name,
                                    pickle_protocol=2)

@@ -13,19 +13,19 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-""" Tests for swiftonfile.swift """
+""" Tests for swiftonhpss.swift """
 
 import os
 import unittest
 import shutil
 import tempfile
 
-import swiftonfile.swift as sof
+import swiftonhpss.swift as sof
 
 
 class TestPkgInfo(unittest.TestCase):
     """
-    Tests for swiftonfile.swift PkgInfo class.
+    Tests for swiftonhpss.swift PkgInfo class.
     """
 
     def test_constructor(self):

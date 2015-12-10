@@ -10,3 +10,8 @@ pastedeploy>=1.3.3
 simplejson>=2.0.9
 xattr>=0.4
 PyECLib==1.0.7
+
+# HPSS-specific package requirements. Get these from your HPSS support
+# representative.
+hpss
+hpssfs

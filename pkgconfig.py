@@ -1,7 +1,7 @@
 # Simple program to save all package information
 # into a file which can be sourced by a bash script
 
-from swiftonfile.swift import _pkginfo as pkginfo
+from swiftonhpss.swift import _pkginfo as pkginfo
 
 PKGCONFIG = 'pkgconfig.in'
 

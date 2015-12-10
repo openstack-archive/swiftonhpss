@@ -33,12 +33,12 @@ class TestSwiftOnFileEnv:
         cls.conn.authenticate()
         cls.account = Account(cls.conn, tf.config.get('account',
                                                       tf.config['username']))
-        cls.root_dir = os.path.join('/mnt/swiftonfile/test')
+        cls.root_dir = os.path.join('/mnt/swiftonhpss/test')
         cls.account.delete_containers()
 
         cls.file_size = 8
         cls.container = cls.account.container(Utils.create_name())
-        if not cls.container.create():
+        if not cls.container.create(None, None):
             raise ResponseError(cls.conn.response)
 
         cls.dirs = [

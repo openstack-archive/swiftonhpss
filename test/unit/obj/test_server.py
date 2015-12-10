@@ -13,7 +13,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-""" Tests for swiftonfile.swift.obj.server subclass """
+""" Tests for swiftonhpss.swift.obj.server subclass """
 
 import os
 from tempfile import mkdtemp
@@ -22,15 +22,15 @@ from eventlet import tpool
 
 from swift.common.swob import Request
 
-from swiftonfile.swift.obj import server as object_server
-from swiftonfile.swift.obj import diskfile
+from swiftonhpss.swift.obj import server as object_server
+from swiftonhpss.swift.obj import diskfile
 
 import unittest
 from test.unit import debug_logger
 
 
 class TestObjectController(unittest.TestCase):
-    """Test swiftonfile.swift.obj.server.ObjectController"""
+    """Test swiftonhpss.swift.obj.server.ObjectController"""
 
     def setUp(self):
         self.tmpdir = mkdtemp()

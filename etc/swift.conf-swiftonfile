@@ -79,10 +79,10 @@ default = yes
 #ec_num_parity_fragments = 4
 #ec_object_segment_size = 1048576
 
-# The following section defines a policy called 'swiftonfile' to be used by
-# swiftonfile object-server implementation.
+# The following section defines a policy called 'swiftonhpss' to be used by
+# swiftonhpss object-server implementation.
 [storage-policy:3]
-name = swiftonfile
+name = swiftonhpss
 policy_type = replication
 
 # The swift-constraints section sets the basic constraints on data

@@ -13,7 +13,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-""" Tests for swiftonfile.swift.obj.diskfile """
+""" Tests for swiftonhpss.swift.obj.diskfile """
 
 import os
 import stat
@@ -27,18 +27,18 @@ from mock import Mock, patch
 from hashlib import md5
 from copy import deepcopy
 from contextlib import nested
-from swiftonfile.swift.common.exceptions import AlreadyExistsAsDir, \
+from swiftonhpss.swift.common.exceptions import AlreadyExistsAsDir, \
     AlreadyExistsAsFile
 from swift.common.exceptions import DiskFileNoSpace, DiskFileNotOpen, \
     DiskFileNotExist, DiskFileExpired
 from swift.common.utils import ThreadPool
 
-from swiftonfile.swift.common.exceptions import SwiftOnFileSystemOSError
-import swiftonfile.swift.common.utils
-from swiftonfile.swift.common.utils import normalize_timestamp
-import swiftonfile.swift.obj.diskfile
-from swiftonfile.swift.obj.diskfile import DiskFileWriter, DiskFileManager
-from swiftonfile.swift.common.utils import DEFAULT_UID, DEFAULT_GID, \
+from swiftonhpss.swift.common.exceptions import SwiftOnFileSystemOSError
+import swiftonhpss.swift.common.utils
+from swiftonhpss.swift.common.utils import normalize_timestamp
+import swiftonhpss.swift.obj.diskfile
+from swiftonhpss.swift.obj.diskfile import DiskFileWriter, DiskFileManager
+from swiftonhpss.swift.common.utils import DEFAULT_UID, DEFAULT_GID, \
     X_OBJECT_TYPE, DIR_OBJECT
 
 from test.unit.common.test_utils import _initxattr, _destroyxattr
@@ -82,7 +82,7 @@ class MockException(Exception):
 
 
 def _mock_rmobjdir(p):
-    raise MockException("swiftonfile.swift.obj.diskfile.rmobjdir() called")
+    raise MockException("swiftonhpss.swift.obj.diskfile.rmobjdir() called")
 
 
 def _mock_do_fsync(fd):
@@ -101,12 +101,12 @@ def _mock_renamer(a, b):
     raise MockRenamerCalled()
 
 class TestDiskFileWriter(unittest.TestCase):
-    """ Tests for swiftonfile.swift.obj.diskfile.DiskFileWriter """
+    """ Tests for swiftonhpss.swift.obj.diskfile.DiskFileWriter """
 
     def test_close(self):
         dw = DiskFileWriter(100, 'a', None)
         mock_close = Mock()
-        with patch("swiftonfile.swift.obj.diskfile.do_close", mock_close):
+        with patch("swiftonhpss.swift.obj.diskfile.do_close", mock_close):
             # It should call do_close
             self.assertEqual(100, dw._fd)
             dw.close()
@@ -120,7 +120,7 @@ class TestDiskFileWriter(unittest.TestCase):
             self.assertEqual(1, mock_close.call_count)
 
 class TestDiskFile(unittest.TestCase):
-    """ Tests for swiftonfile.swift.obj.diskfile """
+    """ Tests for swiftonhpss.swift.obj.diskfile """
 
     def setUp(self):
         self._orig_tpool_exc = tpool.execute
@@ -128,18 +128,18 @@ class TestDiskFile(unittest.TestCase):
         self.lg = FakeLogger()
         _initxattr()
         _mock_clear_metadata()
-        self._saved_df_wm = swiftonfile.swift.obj.diskfile.write_metadata
-        self._saved_df_rm = swiftonfile.swift.obj.diskfile.read_metadata
-        swiftonfile.swift.obj.diskfile.write_metadata = _mock_write_metadata
-        swiftonfile.swift.obj.diskfile.read_metadata = _mock_read_metadata
-        self._saved_ut_wm = swiftonfile.swift.common.utils.write_metadata
-        self._saved_ut_rm = swiftonfile.swift.common.utils.read_metadata
-        swiftonfile.swift.common.utils.write_metadata = _mock_write_metadata
-        swiftonfile.swift.common.utils.read_metadata = _mock_read_metadata
-        self._saved_do_fsync = swiftonfile.swift.obj.diskfile.do_fsync
-        swiftonfile.swift.obj.diskfile.do_fsync = _mock_do_fsync
-        self._saved_fallocate = swiftonfile.swift.obj.diskfile.fallocate
-        swiftonfile.swift.obj.diskfile.fallocate = _mock_fallocate
+        self._saved_df_wm = swiftonhpss.swift.obj.diskfile.write_metadata
+        self._saved_df_rm = swiftonhpss.swift.obj.diskfile.read_metadata
+        swiftonhpss.swift.obj.diskfile.write_metadata = _mock_write_metadata
+        swiftonhpss.swift.obj.diskfile.read_metadata = _mock_read_metadata
+        self._saved_ut_wm = swiftonhpss.swift.common.utils.write_metadata
+        self._saved_ut_rm = swiftonhpss.swift.common.utils.read_metadata
+        swiftonhpss.swift.common.utils.write_metadata = _mock_write_metadata
+        swiftonhpss.swift.common.utils.read_metadata = _mock_read_metadata
+        self._saved_do_fsync = swiftonhpss.swift.obj.diskfile.do_fsync
+        swiftonhpss.swift.obj.diskfile.do_fsync = _mock_do_fsync
+        self._saved_fallocate = swiftonhpss.swift.obj.diskfile.fallocate
+        swiftonhpss.swift.obj.diskfile.fallocate = _mock_fallocate
         self.td = tempfile.mkdtemp()
         self.conf = dict(devices=self.td, mb_per_sync=2,
                          keep_cache_size=(1024 * 1024), mount_check=False)
@@ -149,12 +149,12 @@ class TestDiskFile(unittest.TestCase):
         tpool.execute = self._orig_tpool_exc
         self.lg = None
         _destroyxattr()
-        swiftonfile.swift.obj.diskfile.write_metadata = self._saved_df_wm
-        swiftonfile.swift.obj.diskfile.read_metadata = self._saved_df_rm
-        swiftonfile.swift.common.utils.write_metadata = self._saved_ut_wm
-        swiftonfile.swift.common.utils.read_metadata = self._saved_ut_rm
-        swiftonfile.swift.obj.diskfile.do_fsync = self._saved_do_fsync
-        swiftonfile.swift.obj.diskfile.fallocate = self._saved_fallocate
+        swiftonhpss.swift.obj.diskfile.write_metadata = self._saved_df_wm
+        swiftonhpss.swift.obj.diskfile.read_metadata = self._saved_df_rm
+        swiftonhpss.swift.common.utils.write_metadata = self._saved_ut_wm
+        swiftonhpss.swift.common.utils.read_metadata = self._saved_ut_rm
+        swiftonhpss.swift.obj.diskfile.do_fsync = self._saved_do_fsync
+        swiftonhpss.swift.obj.diskfile.fallocate = self._saved_fallocate
         shutil.rmtree(self.td)
 
     def _get_diskfile(self, d, p, a, c, o, **kwargs):
@@ -214,7 +214,7 @@ class TestDiskFile(unittest.TestCase):
     def test_open_and_close(self):
         mock_close = Mock()
 
-        with mock.patch("swiftonfile.swift.obj.diskfile.do_close", mock_close):
+        with mock.patch("swiftonhpss.swift.obj.diskfile.do_close", mock_close):
             gdf = self._create_and_get_diskfile("vol0", "p57", "ufo47",
                                                 "bar", "z")
             with gdf.open():
@@ -314,7 +314,7 @@ class TestDiskFile(unittest.TestCase):
             closed[0] = True
             os.close(fd[0])
 
-        with mock.patch("swiftonfile.swift.obj.diskfile.do_close", mock_close):
+        with mock.patch("swiftonhpss.swift.obj.diskfile.do_close", mock_close):
             gdf = self._create_and_get_diskfile("vol0", "p57", "ufo47", "bar", "z")
             with gdf.open():
                 assert gdf._fd is not None
@@ -367,7 +367,7 @@ class TestDiskFile(unittest.TestCase):
             closed[0] = True
             os.close(fd[0])
 
-        with mock.patch("swiftonfile.swift.obj.diskfile.do_close", mock_close):
+        with mock.patch("swiftonhpss.swift.obj.diskfile.do_close", mock_close):
             gdf = self._create_and_get_diskfile("vol0", "p57", "ufo47", "bar", "z", fsize=1024*1024*2)
             with gdf.open():
                 assert gdf._fd is not None
@@ -394,7 +394,7 @@ class TestDiskFile(unittest.TestCase):
         try:
             chunks = [ck for ck in reader]
             assert len(chunks) == 0, repr(chunks)
-            with mock.patch("swiftonfile.swift.obj.diskfile.do_close",
+            with mock.patch("swiftonhpss.swift.obj.diskfile.do_close",
                             our_do_close):
                 reader.close()
             assert not called[0]
@@ -443,11 +443,11 @@ class TestDiskFile(unittest.TestCase):
             assert u == DEFAULT_UID
             assert g == DEFAULT_GID
 
-        dc = swiftonfile.swift.obj.diskfile.do_chown
-        swiftonfile.swift.obj.diskfile.do_chown = _mock_do_chown
+        dc = swiftonhpss.swift.obj.diskfile.do_chown
+        swiftonhpss.swift.obj.diskfile.do_chown = _mock_do_chown
         self.assertRaises(
             AlreadyExistsAsFile, gdf._create_dir_object, the_dir)
-        swiftonfile.swift.obj.diskfile.do_chown = dc
+        swiftonhpss.swift.obj.diskfile.do_chown = dc
         self.assertFalse(os.path.isdir(the_dir))
         self.assertFalse(_mapit(the_dir) in _metadata)
 
@@ -465,11 +465,11 @@ class TestDiskFile(unittest.TestCase):
             assert u == DEFAULT_UID
             assert g == DEFAULT_GID
 
-        dc = swiftonfile.swift.obj.diskfile.do_chown
-        swiftonfile.swift.obj.diskfile.do_chown = _mock_do_chown
+        dc = swiftonhpss.swift.obj.diskfile.do_chown
+        swiftonhpss.swift.obj.diskfile.do_chown = _mock_do_chown
         self.assertRaises(
             AlreadyExistsAsFile, gdf._create_dir_object, the_dir)
-        swiftonfile.swift.obj.diskfile.do_chown = dc
+        swiftonhpss.swift.obj.diskfile.do_chown = dc
         self.assertFalse(os.path.isdir(the_dir))
         self.assertFalse(_mapit(the_dir) in _metadata)
 
@@ -631,7 +631,7 @@ class TestDiskFile(unittest.TestCase):
             'ETag': 'etag',
             'X-Timestamp': 'ts',
             'Content-Type': 'application/directory'}
-        with gdf.create() as dw:
+        with gdf.create(None, None) as dw:
             dw.put(newmd)
         assert gdf._data_file == the_dir
         for key, val in newmd.items():
@@ -651,7 +651,7 @@ class TestDiskFile(unittest.TestCase):
         # how this can happen normally.
         newmd['Content-Type'] = ''
         newmd['X-Object-Meta-test'] = '1234'
-        with gdf.create() as dw:
+        with gdf.create(None, None) as dw:
             try:
                 # FIXME: We should probably be able to detect in .create()
                 # when the target file name already exists as a directory to
@@ -690,7 +690,7 @@ class TestDiskFile(unittest.TestCase):
             'Content-Length': '5',
         }
 
-        with gdf.create() as dw:
+        with gdf.create(None, None) as dw:
             assert dw._tmppath is not None
             tmppath = dw._tmppath
             dw.write(body)
@@ -725,7 +725,7 @@ class TestDiskFile(unittest.TestCase):
 
         with mock.patch("os.open", mock_open):
             try:
-                with gdf.create() as dw:
+                with gdf.create(None, None) as dw:
                     assert dw._tmppath is not None
                     dw.write(body)
                     dw.put(metadata)
@@ -762,10 +762,10 @@ class TestDiskFile(unittest.TestCase):
         def mock_rename(*args, **kwargs):
             raise OSError(errno.ENOENT, os.strerror(errno.ENOENT))
 
-        with mock.patch("swiftonfile.swift.obj.diskfile.sleep", mock_sleep):
+        with mock.patch("swiftonhpss.swift.obj.diskfile.sleep", mock_sleep):
             with mock.patch("os.rename", mock_rename):
                 try:
-                    with gdf.create() as dw:
+                    with gdf.create(None, None) as dw:
                         assert dw._tmppath is not None
                         tmppath = dw._tmppath
                         dw.write(body)
@@ -797,7 +797,7 @@ class TestDiskFile(unittest.TestCase):
             'Content-Length': '5',
         }
 
-        with gdf.create() as dw:
+        with gdf.create(None, None) as dw:
             assert dw._tmppath is not None
             tmppath = dw._tmppath
             dw.write(body)
@@ -904,7 +904,7 @@ class TestDiskFile(unittest.TestCase):
         gdf = self._get_diskfile("vol0", "p57", "ufo47", "bar", "dir/z")
         saved_tmppath = ''
         saved_fd = None
-        with gdf.create() as dw:
+        with gdf.create(None, None) as dw:
             assert gdf._put_datadir == os.path.join(self.td, "vol0", "ufo47", "bar", "dir")
             assert os.path.isdir(gdf._put_datadir)
             saved_tmppath = dw._tmppath
@@ -927,7 +927,7 @@ class TestDiskFile(unittest.TestCase):
     def test_create_err_on_close(self):
         gdf = self._get_diskfile("vol0", "p57", "ufo47", "bar", "dir/z")
         saved_tmppath = ''
-        with gdf.create() as dw:
+        with gdf.create(None, None) as dw:
             assert gdf._put_datadir == os.path.join(self.td, "vol0", "ufo47", "bar", "dir")
             assert os.path.isdir(gdf._put_datadir)
             saved_tmppath = dw._tmppath
@@ -942,7 +942,7 @@ class TestDiskFile(unittest.TestCase):
     def test_create_err_on_unlink(self):
         gdf = self._get_diskfile("vol0", "p57", "ufo47", "bar", "dir/z")
         saved_tmppath = ''
-        with gdf.create() as dw:
+        with gdf.create(None, None) as dw:
             assert gdf._put_datadir == os.path.join(self.td, "vol0", "ufo47", "bar", "dir")
             assert os.path.isdir(gdf._put_datadir)
             saved_tmppath = dw._tmppath
@@ -968,8 +968,8 @@ class TestDiskFile(unittest.TestCase):
         }
 
         _mock_do_unlink = Mock()  # Shouldn't be called
-        with patch("swiftonfile.swift.obj.diskfile.do_unlink", _mock_do_unlink):
-            with gdf.create() as dw:
+        with patch("swiftonhpss.swift.obj.diskfile.do_unlink", _mock_do_unlink):
+            with gdf.create(None, None) as dw:
                 assert dw._tmppath is not None
                 tmppath = dw._tmppath
                 dw.write(body)
@@ -994,11 +994,11 @@ class TestDiskFile(unittest.TestCase):
         _m_log = Mock()
 
         with nested(
-                patch("swiftonfile.swift.obj.diskfile.do_open", _m_do_open),
-                patch("swiftonfile.swift.obj.diskfile.do_fstat", _m_do_fstat),
-                patch("swiftonfile.swift.obj.diskfile.read_metadata", _m_rmd),
-                patch("swiftonfile.swift.obj.diskfile.do_close", _m_do_close),
-                patch("swiftonfile.swift.obj.diskfile.logging.warn", _m_log)):
+                patch("swiftonhpss.swift.obj.diskfile.do_open", _m_do_open),
+                patch("swiftonhpss.swift.obj.diskfile.do_fstat", _m_do_fstat),
+                patch("swiftonhpss.swift.obj.diskfile.read_metadata", _m_rmd),
+                patch("swiftonhpss.swift.obj.diskfile.do_close", _m_do_close),
+                patch("swiftonhpss.swift.obj.diskfile.logging.warn", _m_log)):
             gdf = self._get_diskfile("vol0", "p57", "ufo47", "bar", "z")
             try:
                 with gdf.open():
@@ -1033,7 +1033,7 @@ class TestDiskFile(unittest.TestCase):
 
         _m_do_close = Mock()
 
-        with patch("swiftonfile.swift.obj.diskfile.do_close", _m_do_close):
+        with patch("swiftonhpss.swift.obj.diskfile.do_close", _m_do_close):
             gdf = self._get_diskfile("vol0", "p57", "ufo47", "bar", "z")
             try:
                 with gdf.open():

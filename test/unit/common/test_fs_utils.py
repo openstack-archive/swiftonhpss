@@ -22,8 +22,8 @@ from nose import SkipTest
 from mock import patch, Mock
 from time import sleep
 from tempfile import mkdtemp, mkstemp
-from swiftonfile.swift.common import fs_utils as fs
-from swiftonfile.swift.common.exceptions import SwiftOnFileSystemOSError
+from swiftonhpss.swift.common import fs_utils as fs
+from swiftonhpss.swift.common.exceptions import SwiftOnFileSystemOSError
 from swift.common.exceptions import DiskFileNoSpace
 
 

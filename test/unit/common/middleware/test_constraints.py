@@ -15,7 +15,7 @@
 
 import unittest
 from swift.common.swob import Request, Response
-from swiftonfile.swift.common.middleware import check_constraints
+from swiftonhpss.swift.common.middleware import check_constraints
 from mock import Mock, patch
 from contextlib import nested
 
@@ -36,7 +36,7 @@ class TestConstraintsMiddleware(unittest.TestCase):
 
     def setUp(self):
         self.conf = {
-            'policies': 'swiftonfile,cephfs-policy'}
+            'policies': 'swiftonhpss,cephfs-policy'}
 
         self.container1_info_mock = Mock()
         self.container1_info_mock.return_value = {'status': 0,
@@ -56,7 +56,7 @@ class TestConstraintsMiddleware(unittest.TestCase):
 
         self.policies_mock = Mock()
         self.sof_policy_mock = Mock()
-        self.sof_policy_mock.name = 'swiftonfile'
+        self.sof_policy_mock.name = 'swiftonhpss'
         attrs = {'get_by_index.return_value': self.sof_policy_mock }
         self.policies_mock.configure_mock(**attrs)
 
@@ -79,9 +79,9 @@ class TestConstraintsMiddleware(unittest.TestCase):
         path = '/V1.0/a/c2//o'
 
         with nested(
-                patch("swiftonfile.swift.common.middleware.check_constraints."
+                patch("swiftonhpss.swift.common.middleware.check_constraints."
                       "get_container_info", self.container2_info_mock),
-                patch("swiftonfile.swift.common.middleware.check_constraints."
+                patch("swiftonhpss.swift.common.middleware.check_constraints."
                       "POLICIES", self.policies_mock)):
             resp = Request.blank(path, environ={'REQUEST_METHOD': 'PUT'}
                                  ).get_response(self.test_check)
@@ -93,9 +93,9 @@ class TestConstraintsMiddleware(unittest.TestCase):
         path = '/V1.0/a/c2/o/'
 
         with nested(
-                patch("swiftonfile.swift.common.middleware.check_constraints."
+                patch("swiftonhpss.swift.common.middleware.check_constraints."
                       "get_container_info", self.container2_info_mock),
-                patch("swiftonfile.swift.common.middleware.check_constraints."
+                patch("swiftonhpss.swift.common.middleware.check_constraints."
                       "POLICIES", self.policies_mock)):
             resp = Request.blank(path, environ={'REQUEST_METHOD': 'PUT'}
                                  ).get_response(self.test_check)
@@ -108,9 +108,9 @@ class TestConstraintsMiddleware(unittest.TestCase):
         path = '/V1.0/a/c2/.'
 
         with nested(
-                patch("swiftonfile.swift.common.middleware.check_constraints."
+                patch("swiftonhpss.swift.common.middleware.check_constraints."
                       "get_container_info", self.container2_info_mock),
-                patch("swiftonfile.swift.common.middleware.check_constraints."
+                patch("swiftonhpss.swift.common.middleware.check_constraints."
                       "POLICIES", self.policies_mock)):
             resp = Request.blank(path, environ={'REQUEST_METHOD': 'PUT'}
                                  ).get_response(self.test_check)
@@ -122,19 +122,19 @@ class TestConstraintsMiddleware(unittest.TestCase):
         longname = 'c' * 256
         path = '/V1.0/a/' + longname
         resp = Request.blank(path, method='PUT',
-                             headers={'X-Storage-Policy': 'swiftonfile'}
+                             headers={'X-Storage-Policy': 'swiftonhpss'}
                              ).get_response(self.test_check)
         self.assertEquals(resp.status_int, 400)
 
         # test case where storage policy is not defined in header and 
         # container would be created in default policy, which happens to be
-        # a swiftonfile policy
+        # a swiftonhpss policy
         default_policies_mock = Mock()
         sof_policy_mock = Mock()
-        sof_policy_mock.name = 'swiftonfile'
+        sof_policy_mock.name = 'swiftonhpss'
         attrs = {'default.return_value': self.sof_policy_mock }
         default_policies_mock.configure_mock(**attrs)
-        with patch("swiftonfile.swift.common.middleware.check_constraints."
+        with patch("swiftonhpss.swift.common.middleware.check_constraints."
                    "POLICIES", default_policies_mock):
           resp = Request.blank(path, method='PUT').get_response(self.test_check)
           self.assertEquals(resp.status_int, 400)
@@ -145,10 +145,10 @@ class TestConstraintsMiddleware(unittest.TestCase):
             path = '/V1.0/a/c2/' + longname
 
             with nested(
-                    patch("swiftonfile.swift.common.middleware."
+                    patch("swiftonhpss.swift.common.middleware."
                           "check_constraints.get_container_info",
                           self.container2_info_mock),
-                    patch("swiftonfile.swift.common.middleware."
+                    patch("swiftonhpss.swift.common.middleware."
                           "check_constraints.POLICIES", self.policies_mock)):
                 resp = Request.blank(path, environ={'REQUEST_METHOD': 'PUT'}
                                      ).get_response(self.test_check)
@@ -158,9 +158,9 @@ class TestConstraintsMiddleware(unittest.TestCase):
         path = '/V1.0/a/c2/' + longname
 
         with nested(
-                patch("swiftonfile.swift.common.middleware.check_constraints."
+                patch("swiftonhpss.swift.common.middleware.check_constraints."
                       "get_container_info", self.container2_info_mock),
-                patch("swiftonfile.swift.common.middleware.check_constraints."
+                patch("swiftonhpss.swift.common.middleware.check_constraints."
                       "POLICIES", self.policies_mock)):
             resp = Request.blank(path, environ={'REQUEST_METHOD': 'PUT'}
                                  ).get_response(self.test_check)
@@ -170,7 +170,7 @@ class TestConstraintsMiddleware(unittest.TestCase):
     def test_PUT_object_with_policy0(self):
         path = '/V1.0/a/c1//o'
 
-        with patch("swiftonfile.swift.common.middleware."
+        with patch("swiftonhpss.swift.common.middleware."
                    "check_constraints.get_container_info",
                    self.container1_info_mock):
             resp = Request.blank(path, environ={'REQUEST_METHOD': 'PUT'}
@@ -180,7 +180,7 @@ class TestConstraintsMiddleware(unittest.TestCase):
         longname = 'o' * 222
         path = '/V1.0/a/c2/' + longname
 
-        with patch("swiftonfile.swift.common.middleware.check_constraints."
+        with patch("swiftonhpss.swift.common.middleware.check_constraints."
                    "get_container_info", self.container1_info_mock):
             resp = Request.blank(path, environ={'REQUEST_METHOD': 'PUT'}
                                  ).get_response(self.test_check)

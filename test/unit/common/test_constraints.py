@@ -15,7 +15,7 @@
 
 import unittest
 from mock import patch, Mock
-from swiftonfile.swift.common import constraints as cnt
+from swiftonhpss.swift.common import constraints as cnt
 
 
 def mock_check_object_creation(*args, **kwargs):
