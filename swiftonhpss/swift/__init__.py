@@ -43,7 +43,7 @@ class PkgInfo(object):
 
 
 # Change the Package version here
-_pkginfo = PkgInfo(canonical_version='2.3.0',
+_pkginfo = PkgInfo(canonical_version='2.5.0',
                    release='0',
                    name='swiftonhpss',
                    final=False)
