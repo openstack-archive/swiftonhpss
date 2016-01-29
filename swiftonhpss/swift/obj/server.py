@@ -30,7 +30,7 @@ from swift.common.swob import HTTPConflict, HTTPBadRequest, HeaderKeyDict, \
 from swift.common.utils import public, timing_stats, replication, \
     config_true_value, Timestamp, csv_append
 from swift.common.request_helpers import get_name_and_placement, \
-    split_and_validate_path, is_sys_or_user_meta
+    split_and_validate_path, is_sys_or_user_meta, is_user_meta
 from swiftonhpss.swift.common.exceptions import AlreadyExistsAsFile, \
     AlreadyExistsAsDir, SwiftOnFileSystemIOError, SwiftOnFileSystemOSError, \
     SwiftOnFileFsException
@@ -41,6 +41,7 @@ from swift.common.constraints import valid_timestamp, check_account_format, \
     check_destination_header
 
 from swift.obj import server
+from swift.common.ring import Ring
 
 from swiftonhpss.swift.obj.diskfile import DiskFileManager
 from swiftonhpss.swift.common.constraints import check_object_creation
@@ -76,10 +77,18 @@ class ObjectController(server.ObjectController):
         """
         # Replaces Swift's DiskFileRouter object reference with ours.
         self._diskfile_router = SwiftOnFileDiskFileRouter(conf, self.logger)
+        self.swift_dir = conf.get('swift_dir', '/etc/swift')
+        self.container_ring = None
         # This conf option will be deprecated and eventualy removed in
         # future releases
         utils.read_pickled_metadata = \
             config_true_value(conf.get('read_pickled_metadata', 'no'))
+
+    def get_container_ring(self):
+        """Get the container ring.  Load it, if it hasn't been yet."""
+        if not self.container_ring:
+            self.container_ring = Ring(self.swift_dir, ring_name='container')
+        return self.container_ring
 
     @public
     @timing_stats()
@@ -252,8 +261,8 @@ class ObjectController(server.ObjectController):
                                   device, policy)
             # Create convenience symlink
             try:
-                self.object_symlink(request, disk_file._data_file, device,
-                                    account)
+                self._object_symlink(request, disk_file._data_file, device,
+                                     account)
             except SwiftOnFileSystemOSError:
                 return HTTPServiceUnavailable(request=request)
             return HTTPCreated(request=request, etag=etag)
@@ -263,7 +272,39 @@ class ObjectController(server.ObjectController):
                 split_and_validate_path(request, 1, 5, True)
             return HTTPConflict(drive=device, request=request)
 
-    def object_symlink(self, request, diskfile, device, account):
+    def _sof_container_update(self, request, resp):
+        """
+        SOF specific metadata is set in DiskFile.open()._filter_metadata()
+        This method internally invokes Swift's container_update() method.
+        """
+        device, partition, account, container, obj, policy_idx = \
+            get_name_and_placement(request, 5, 5, True)
+
+        # The container_update() method requires certain container
+        # specific headers. The proxy object controller appends these
+        # headers for PUT backend request but not for HEAD/GET requests.
+        # Thus, we populate the required information in request
+        # and then invoke container_update()
+        container_partition, container_nodes = \
+            self.get_container_ring().get_nodes(account, container)
+        request.headers['X-Container-Partition'] = container_partition
+        for node in container_nodes:
+            request.headers['X-Container-Host'] = csv_append(
+                request.headers.get('X-Container-Host'),
+                '%(ip)s:%(port)s' % node)
+            request.headers['X-Container-Device'] = csv_append(
+                request.headers.get('X-Container-Device'), node['device'])
+
+        self.container_update(
+            'PUT', account, container, obj, request,
+            HeaderKeyDict({
+                'x-size': resp.headers['Content-Length'],
+                'x-content-type': resp.headers['Content-Type'],
+                'x-timestamp': resp.headers['X-Timestamp'],
+                'x-etag': resp.headers['ETag']}),
+            device, policy_idx)
+
+    def _object_symlink(self, request, diskfile, device, account):
         mount = diskfile.split(device)[0]
         dev = "%s%s" % (mount, device)
         project = None
@@ -333,22 +374,8 @@ class ObjectController(server.ObjectController):
         except SwiftOnFileSystemIOError:
             return HTTPServiceUnavailable(request=request)
 
-        # Bill Owen's hack to force container sync on HEAD, so we can manually
-        # tell the Swift container server when objects exist on disk it didn't
-        # know about.
-        # TODO: do a similar trick for HEADing objects that didn't exist
-        # TODO: see if this block that's duplicated can be a function instead
         if 'X-Object-Sysmeta-Update-Container' in response.headers:
-            self.container_update(
-                'PUT', account, container, obj, request,
-                HeaderKeyDict(
-                    {'x-size': metadata['Content-Length'],
-                     'x-content-type': metadata['Content-Type'],
-                     'x-timestamp': metadata['X-Timestamp'],
-                     'x-etag': metadata['ETag']
-                     }
-                ),
-                device, policy)
+            self._sof_container_update(request, response)
             response.headers.pop('X-Object-Sysmeta-Update-Container')
 
         return response
@@ -551,7 +578,7 @@ class ObjectController(server.ObjectController):
             orig_timestamp = e.timestamp
             orig_metadata = e.metadata
             response_class = HTTPNotFound
-        except DiskFileDeleted:
+        except DiskFileDeleted as e:
             orig_timestamp = e.timestamp
             orig_metadata = {}
             response_class = HTTPNotFound

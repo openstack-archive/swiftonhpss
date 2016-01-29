@@ -218,38 +218,6 @@ def clean_metadata(path_or_fd):
         key += 1
 
 
-def validate_object(metadata, statinfo=None):
-    if not metadata:
-        return False
-
-    if X_TIMESTAMP not in metadata.keys() or \
-       X_CONTENT_TYPE not in metadata.keys() or \
-       X_ETAG not in metadata.keys() or \
-       X_CONTENT_LENGTH not in metadata.keys() or \
-       X_TYPE not in metadata.keys() or \
-       X_OBJECT_TYPE not in metadata.keys():
-        return False
-
-    if statinfo and stat.S_ISREG(statinfo.st_mode):
-
-        # File length has changed
-        if int(metadata[X_CONTENT_LENGTH]) != statinfo.st_size:
-            return False
-
-        # File might have changed with length being the same.
-        if X_MTIME in metadata and \
-                normalize_timestamp(metadata[X_MTIME]) != \
-                normalize_timestamp(statinfo.st_mtime):
-            return False
-
-    if metadata[X_TYPE] == OBJECT:
-        return True
-
-    logging.warn('validate_object: metadata type is not OBJECT (%r)',
-                 metadata[X_TYPE])
-    return False
-
-
 def _read_for_etag(fp):
     etag = md5()
     while True:
@@ -267,7 +235,7 @@ def _read_for_etag(fp):
     return etag.hexdigest()
 
 
-def _get_etag(path_or_fd):
+def get_etag(fd):
     """
     FIXME: It would be great to have a translator that returns the md5sum() of
     the file as an xattr that can be simply fetched.
@@ -275,16 +243,16 @@ def _get_etag(path_or_fd):
     Since we don't have that we should yield after each chunk read and
     computed so that we don't consume the worker thread.
     """
-    if isinstance(path_or_fd, int):
+    if isinstance(fd, int):
         # We are given a file descriptor, so this is an invocation from the
         # DiskFile.open() method.
-        fd = path_or_fd
+        fd = fd
         etag = _read_for_etag(do_dup(fd))
         do_lseek(fd, 0, os.SEEK_SET)
     else:
         # We are given a path to the object when the DiskDir.list_objects_iter
         # method invokes us.
-        path = path_or_fd
+        path = fd
         fd = do_open(path, os.O_RDONLY)
         etag = _read_for_etag(fd)
         do_close(fd)
@@ -317,27 +285,8 @@ def get_object_metadata(obj_path_or_fd, stats=None):
             X_OBJECT_TYPE: DIR_NON_OBJECT if is_dir else FILE,
             X_CONTENT_LENGTH: 0 if is_dir else stats.st_size,
             X_MTIME: 0 if is_dir else normalize_timestamp(stats.st_mtime),
-            X_ETAG: md5().hexdigest() if is_dir else _get_etag(obj_path_or_fd)}
+            X_ETAG: md5().hexdigest() if is_dir else get_etag(obj_path_or_fd)}
     return metadata
-
-
-def restore_metadata(path, metadata, meta_orig):
-    if meta_orig:
-        meta_new = meta_orig.copy()
-        meta_new.update(metadata)
-    else:
-        meta_new = metadata
-    if meta_orig != meta_new:
-        write_metadata(path, meta_new)
-    return meta_new
-
-
-def create_object_metadata(obj_path_or_fd, stats=None, existing_meta={}):
-    # We must accept either a path or a file descriptor as an argument to this
-    # method, as the diskfile modules uses a file descriptior and the DiskDir
-    # module (for container operations) uses a path.
-    metadata_from_stat = get_object_metadata(obj_path_or_fd, stats)
-    return restore_metadata(obj_path_or_fd, metadata_from_stat, existing_meta)
 
 
 # The following dir_xxx calls should definitely be replaced

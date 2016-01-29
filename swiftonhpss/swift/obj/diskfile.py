@@ -25,6 +25,7 @@ import logging
 import time
 import hpssfs
 from uuid import uuid4
+from hashlib import md5
 from eventlet import sleep
 from contextlib import contextmanager
 from swiftonhpss.swift.common.exceptions import AlreadyExistsAsFile, \
@@ -41,9 +42,9 @@ from swiftonhpss.swift.common.exceptions import SwiftOnFileSystemOSError, \
 from swiftonhpss.swift.common.fs_utils import do_fstat, do_open, do_close, \
     do_unlink, do_chown, do_fsync, do_fchown, do_stat, do_write, do_read, \
     do_fadvise64, do_rename, do_fdatasync, do_lseek, do_mkdir
-from swiftonhpss.swift.common.utils import read_metadata, write_metadata, \
-    validate_object, create_object_metadata, rmobjdir, dir_is_object, \
-    get_object_metadata, write_pickle
+from swiftonhpss.swift.common.utils import read_metadata, write_metadata,\
+    rmobjdir, dir_is_object, \
+    get_object_metadata, write_pickle, get_etag
 from swiftonhpss.swift.common.utils import X_CONTENT_TYPE, \
     X_TIMESTAMP, X_TYPE, X_OBJECT_TYPE, FILE, OBJECT, DIR_TYPE, \
     FILE_TYPE, DEFAULT_UID, DEFAULT_GID, DIR_NON_OBJECT, DIR_OBJECT, \
@@ -53,7 +54,7 @@ from swift.obj.diskfile import get_async_dir
 
 # FIXME: Hopefully we'll be able to move to Python 2.7+ where O_CLOEXEC will
 # be back ported. See http://www.python.org/dev/peps/pep-0433/
-O_CLOEXEC = 0o2000000
+O_CLOEXEC = 02000000
 
 MAX_RENAME_ATTEMPTS = 10
 MAX_OPEN_ATTEMPTS = 10
@@ -593,7 +594,12 @@ class DiskFile(object):
         self._is_dir = False
         self._metadata = None
         self._fd = None
+        # Save stat info as internal variable to avoid multiple stat() calls
         self._stat = None
+        # Save md5sum of object as internal variable to avoid reading the
+        # entire object more than once.
+        self._etag = None
+        self._file_has_changed = None
         # Don't store a value for data_file until we know it exists.
         self._data_file = None
 
@@ -662,9 +668,9 @@ class DiskFile(object):
             obj_size = self._stat.st_size
 
             self._metadata = read_metadata(self._fd)
-            if not validate_object(self._metadata, self._stat):
-                self._metadata = create_object_metadata(self._fd, self._stat,
-                                                        self._metadata)
+            if not self._validate_object_metadata(self._fd):
+                self._create_object_metadata(self._fd)
+
             assert self._metadata is not None
             self._filter_metadata()
 
@@ -694,6 +700,92 @@ class DiskFile(object):
 
         return self
 
+    def _validate_object_metadata(self, fd):
+
+        # Has no Swift specific metadata saved as xattr. Probably because
+        # object was added/replaced through filesystem interface.
+        if not self._metadata:
+            self._file_has_changed = True
+            return False
+
+        required_keys = \
+            (X_TIMESTAMP, X_CONTENT_TYPE, X_CONTENT_LENGTH, X_ETAG,
+             # SOF specific keys
+             X_TYPE, X_OBJECT_TYPE)
+
+        if not all(k in self._metadata for k in required_keys):
+            # At least one of the required keys does not exist
+            return False
+
+        if not self._is_dir:
+            # X_MTIME is a new key added recently, newer objects will
+            # have the key set during PUT.
+            if X_MTIME in self._metadata:
+                # Check if the file has been modified through filesystem
+                # interface by comparing mtime stored in xattr during PUT
+                # and current mtime of file.
+                if normalize_timestamp(self._metadata[X_MTIME]) != \
+                        normalize_timestamp(self._stat.st_mtime):
+                    self._file_has_changed = True
+                    return False
+            else:
+                # Without X_MTIME key, comparing md5sum is the only way
+                # to determine if file has changed or not. This is inefficient
+                # but there's no other way!
+                self._etag = get_etag(fd)
+                if self._etag != self._metadata[X_ETAG]:
+                    self._file_has_changed = True
+                    return False
+                else:
+                    # Checksums are same; File has not changed. For the next
+                    # GET request on same file, we don't compute md5sum again!
+                    # This is achieved by setting X_MTIME to mtime in
+                    # _create_object_metadata()
+                    return False
+
+        if self._metadata[X_TYPE] == OBJECT:
+            return True
+
+        return False
+
+    def _create_object_metadata(self, fd):
+
+        if self._etag is None:
+            self._etag = md5().hexdigest() if self._is_dir \
+                else get_etag(fd)
+
+        if self._file_has_changed or (X_TIMESTAMP not in self._metadata):
+            timestamp = normalize_timestamp(self._stat.st_mtime)
+        else:
+            timestamp = self._metadata[X_TIMESTAMP]
+
+        metadata = {
+            X_TYPE: OBJECT,
+            X_TIMESTAMP: timestamp,
+            X_CONTENT_TYPE: DIR_TYPE if self._is_dir else FILE_TYPE,
+            X_OBJECT_TYPE: DIR_NON_OBJECT if self._is_dir else FILE,
+            X_CONTENT_LENGTH: 0 if self._is_dir else self._stat.st_size,
+            X_ETAG: self._etag}
+
+        # Add X_MTIME key if object is a file
+        if not self._is_dir:
+            metadata[X_MTIME] = normalize_timestamp(self._stat.st_mtime)
+
+        meta_new = self._metadata.copy()
+        meta_new.update(metadata)
+        if self._metadata != meta_new:
+            write_metadata(fd, meta_new)
+            # Avoid additional read_metadata() later
+            self._metadata = meta_new
+
+    def _filter_metadata(self):
+        for key in (X_TYPE, X_OBJECT_TYPE, X_MTIME):
+            self._metadata.pop(key, None)
+        if self._file_has_changed:
+            # Really ugly hack to let SOF's GET() wrapper know that we need
+            # to update the container database
+            self._metadata['X-Object-Sysmeta-Update-Container'] = True
+
     def _is_object_expired(self, metadata):
         try:
             x_delete_at = int(metadata['X-Delete-At'])
@@ -708,12 +800,6 @@ class DiskFile(object):
             if x_delete_at <= time.time():
                 return True
         return False
-
-    def _filter_metadata(self):
-        if X_TYPE in self._metadata:
-            self._metadata.pop(X_TYPE)
-        if X_OBJECT_TYPE in self._metadata:
-            self._metadata.pop(X_OBJECT_TYPE)
 
     def __enter__(self):
         """

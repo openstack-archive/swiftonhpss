@@ -317,36 +317,6 @@ class TestUtils(unittest.TestCase):
         assert res_d == {}
         assert _xattr_op_cnt['get'] == 3, "%r" % _xattr_op_cnt
 
-    def test_restore_metadata_none(self):
-        # No initial metadata
-        path = "/tmp/foo/i"
-        res_d = utils.restore_metadata(path, {'b': 'y'}, {})
-        expected_d = {'b': 'y'}
-        assert res_d == expected_d, "Expected %r, result %r" % (expected_d, res_d)
-        assert _xattr_op_cnt['set'] == 1, "%r" % _xattr_op_cnt
-
-    def test_restore_metadata(self):
-        # Initial metadata
-        path = "/tmp/foo/i"
-        initial_d = {'a': 'z'}
-        xkey = _xkey(path, utils.METADATA_KEY)
-        _xattrs[xkey] = serialize_metadata(initial_d)
-        res_d = utils.restore_metadata(path, {'b': 'y'}, initial_d)
-        expected_d = {'a': 'z', 'b': 'y'}
-        assert res_d == expected_d, "Expected %r, result %r" % (expected_d, res_d)
-        assert _xattr_op_cnt['set'] == 1, "%r" % _xattr_op_cnt
-
-    def test_restore_metadata_nochange(self):
-        # Initial metadata but no changes
-        path = "/tmp/foo/i"
-        initial_d = {'a': 'z'}
-        xkey = _xkey(path, utils.METADATA_KEY)
-        _xattrs[xkey] = serialize_metadata(initial_d)
-        res_d = utils.restore_metadata(path, {}, initial_d)
-        expected_d = {'a': 'z'}
-        assert res_d == expected_d, "Expected %r, result %r" % (expected_d, res_d)
-        assert _xattr_op_cnt['set'] == 0, "%r" % _xattr_op_cnt
-
     def test_deserialize_metadata_pickle(self):
         orig_md = {'key1': 'value1', 'key2': 'value2'}
         pickled_md = pickle.dumps(orig_md, PICKLE_PROTOCOL)
@@ -385,14 +355,14 @@ class TestUtils(unittest.TestCase):
 
     def test_get_etag_empty(self):
         tf = tempfile.NamedTemporaryFile()
-        hd = utils._get_etag(tf.name)
+        hd = utils.get_etag(tf.name)
         assert hd == hashlib.md5().hexdigest()
 
     def test_get_etag(self):
         tf = tempfile.NamedTemporaryFile()
         tf.file.write('123' * utils.CHUNK_SIZE)
         tf.file.flush()
-        hd = utils._get_etag(tf.name)
+        hd = utils.get_etag(tf.name)
         tf.file.seek(0)
         md5 = hashlib.md5()
         while True:
@@ -401,137 +371,6 @@ class TestUtils(unittest.TestCase):
                 break
             md5.update(chunk)
         assert hd == md5.hexdigest()
-
-    def test_get_object_metadata_dne(self):
-        md = utils.get_object_metadata("/tmp/doesNotEx1st")
-        assert md == {}
-
-    def test_get_object_metadata_err(self):
-        tf = tempfile.NamedTemporaryFile()
-        try:
-            utils.get_object_metadata(
-                os.path.join(tf.name, "doesNotEx1st"))
-        except SwiftOnFileSystemOSError as e:
-            assert e.errno != errno.ENOENT
-        else:
-            self.fail("Expected exception")
-
-    obj_keys = (utils.X_TIMESTAMP, utils.X_CONTENT_TYPE, utils.X_ETAG,
-                utils.X_CONTENT_LENGTH, utils.X_TYPE, utils.X_OBJECT_TYPE)
-
-    def test_get_object_metadata_file(self):
-        tf = tempfile.NamedTemporaryFile()
-        tf.file.write('123')
-        tf.file.flush()
-        md = utils.get_object_metadata(tf.name)
-        for key in self.obj_keys:
-            assert key in md, "Expected key %s in %r" % (key, md)
-        assert md[utils.X_TYPE] == utils.OBJECT
-        assert md[utils.X_OBJECT_TYPE] == utils.FILE
-        assert md[utils.X_CONTENT_TYPE] == utils.FILE_TYPE
-        assert md[utils.X_CONTENT_LENGTH] == os.path.getsize(tf.name)
-        assert md[utils.X_TIMESTAMP] == utils.normalize_timestamp(os.path.getctime(tf.name))
-        assert md[utils.X_ETAG] == utils._get_etag(tf.name)
-
-    def test_get_object_metadata_dir(self):
-        td = tempfile.mkdtemp()
-        try:
-            md = utils.get_object_metadata(td)
-            for key in self.obj_keys:
-                assert key in md, "Expected key %s in %r" % (key, md)
-            assert md[utils.X_TYPE] == utils.OBJECT
-            assert md[utils.X_OBJECT_TYPE] == utils.DIR_NON_OBJECT
-            assert md[utils.X_CONTENT_TYPE] == utils.DIR_TYPE
-            assert md[utils.X_CONTENT_LENGTH] == 0
-            assert md[utils.X_TIMESTAMP] == utils.normalize_timestamp(os.path.getctime(td))
-            assert md[utils.X_ETAG] == hashlib.md5().hexdigest()
-        finally:
-            os.rmdir(td)
-
-    def test_create_object_metadata_file(self):
-        tf = tempfile.NamedTemporaryFile()
-        tf.file.write('4567')
-        tf.file.flush()
-        r_md = utils.create_object_metadata(tf.name)
-
-        xkey = _xkey(tf.name, utils.METADATA_KEY)
-        assert len(_xattrs.keys()) == 1
-        assert xkey in _xattrs
-        assert _xattr_op_cnt['set'] == 1
-        md = deserialize_metadata(_xattrs[xkey])
-        assert r_md == md
-
-        for key in self.obj_keys:
-            assert key in md, "Expected key %s in %r" % (key, md)
-        assert md[utils.X_TYPE] == utils.OBJECT
-        assert md[utils.X_OBJECT_TYPE] == utils.FILE
-        assert md[utils.X_CONTENT_TYPE] == utils.FILE_TYPE
-        assert md[utils.X_CONTENT_LENGTH] == os.path.getsize(tf.name)
-        assert md[utils.X_TIMESTAMP] == utils.normalize_timestamp(os.path.getctime(tf.name))
-        assert md[utils.X_ETAG] == utils._get_etag(tf.name)
-
-    def test_create_object_metadata_dir(self):
-        td = tempfile.mkdtemp()
-        try:
-            r_md = utils.create_object_metadata(td)
-
-            xkey = _xkey(td, utils.METADATA_KEY)
-            assert len(_xattrs.keys()) == 1
-            assert xkey in _xattrs
-            assert _xattr_op_cnt['set'] == 1
-            md = deserialize_metadata(_xattrs[xkey])
-            assert r_md == md
-
-            for key in self.obj_keys:
-                assert key in md, "Expected key %s in %r" % (key, md)
-            assert md[utils.X_TYPE] == utils.OBJECT
-            assert md[utils.X_OBJECT_TYPE] == utils.DIR_NON_OBJECT
-            assert md[utils.X_CONTENT_TYPE] == utils.DIR_TYPE
-            assert md[utils.X_CONTENT_LENGTH] == 0
-            assert md[utils.X_TIMESTAMP] == utils.normalize_timestamp(os.path.getctime(td))
-            assert md[utils.X_ETAG] == hashlib.md5().hexdigest()
-        finally:
-            os.rmdir(td)
-
-    def test_validate_object_empty(self):
-        ret = utils.validate_object({})
-        assert not ret
-
-    def test_validate_object_missing_keys(self):
-        ret = utils.validate_object({'foo': 'bar'})
-        assert not ret
-
-    def test_validate_object_bad_type(self):
-        md = {utils.X_TIMESTAMP: 'na',
-              utils.X_CONTENT_TYPE: 'na',
-              utils.X_ETAG: 'bad',
-              utils.X_CONTENT_LENGTH: 'na',
-              utils.X_TYPE: 'bad',
-              utils.X_OBJECT_TYPE: 'na'}
-        ret = utils.validate_object(md)
-        assert not ret
-
-    def test_validate_object_good_type(self):
-        md = {utils.X_TIMESTAMP: 'na',
-              utils.X_CONTENT_TYPE: 'na',
-              utils.X_ETAG: 'bad',
-              utils.X_CONTENT_LENGTH: 'na',
-              utils.X_TYPE: utils.OBJECT,
-              utils.X_OBJECT_TYPE: 'na'}
-        ret = utils.validate_object(md)
-        assert ret
-
-    def test_validate_object_with_stat(self):
-        md = {utils.X_TIMESTAMP: 'na',
-              utils.X_CONTENT_TYPE: 'na',
-              utils.X_ETAG: 'bad',
-              utils.X_CONTENT_LENGTH: '12345',
-              utils.X_TYPE: utils.OBJECT,
-              utils.X_OBJECT_TYPE: 'na'}
-        fake_stat = Mock(st_size=12346, st_mode=33188)
-        self.assertFalse(utils.validate_object(md, fake_stat))
-        fake_stat = Mock(st_size=12345, st_mode=33188)
-        self.assertTrue(utils.validate_object(md, fake_stat))
 
     def test_write_pickle(self):
         td = tempfile.mkdtemp()
