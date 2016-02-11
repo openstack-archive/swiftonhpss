@@ -24,6 +24,7 @@ except ImportError:
 import logging
 import time
 import hpssfs
+import xattr
 from uuid import uuid4
 from hashlib import md5
 from eventlet import sleep
@@ -54,7 +55,7 @@ from swift.obj.diskfile import get_async_dir
 
 # FIXME: Hopefully we'll be able to move to Python 2.7+ where O_CLOEXEC will
 # be back ported. See http://www.python.org/dev/peps/pep-0433/
-O_CLOEXEC = 02000000
+O_CLOEXEC = 0o20000000
 
 MAX_RENAME_ATTEMPTS = 10
 MAX_OPEN_ATTEMPTS = 10
@@ -298,7 +299,7 @@ class DiskFileWriter(object):
         df._threadpool.run_in_thread(self._write_entire_chunk, chunk)
         return self._upload_size
 
-    def _finalize_put(self, metadata, purgelock=False):
+    def _finalize_put(self, metadata, purgelock=False, has_etag=True):
         # Write out metadata before fsync() to ensure it is also forced to
         # disk.
         write_metadata(self._fd, metadata)
@@ -390,11 +391,33 @@ class DiskFileWriter(object):
             else:
                 # Success!
                 break
+
         # Close here so the calling context does not have to perform this
         # in a thread.
         self.close()
 
-    def put(self, metadata, purgelock):
+        # TODO: see if this is really the right way of getting the ETag
+        if not has_etag:
+            sleep(.5)
+            try:
+                xattrs = xattr.xattr(df._data_file)
+                if 'system.hpss.hash' in xattrs:
+                    etag = xattrs['system.hpss.hash']
+                elif 'user.hash.checksum' in xattrs:
+                    etag = xattrs['user.hash.checksum']
+                else:
+                    raise DiskFileError(
+                        'ETag was not in HPSS xattrs for file %s'
+                        % df._data_file)
+                metadata['ETag'] = etag
+                write_metadata(df._data_file, metadata)
+            except IOError as err:
+                raise DiskFileError(
+                    err.errno,
+                    "Could not get xattrs for file '%s', reason: %s"
+                    % (df._data_file, err.strerror))
+
+    def put(self, metadata, purgelock=False, has_etag=True):
         """
         Finalize writing the file on disk, and renames it from the temp file
         to the real location.  This should be called after the data has been
@@ -424,7 +447,7 @@ class DiskFileWriter(object):
                                      ' as a directory' % df._data_file)
 
         df._threadpool.force_run_in_thread(self._finalize_put, metadata,
-                                           purgelock)
+                                           purgelock, has_etag)
 
         # Avoid the unlink() system call as part of the mkstemp context
         # cleanup
@@ -622,6 +645,7 @@ class DiskFile(object):
             self._put_datadir = self._container_path
 
         self._data_file = os.path.join(self._put_datadir, self._obj)
+        self._stat = do_stat(self._data_file)
 
     @property
     def timestamp(self):
@@ -668,7 +692,7 @@ class DiskFile(object):
             obj_size = self._stat.st_size
 
             self._metadata = read_metadata(self._fd)
-            if not self._validate_object_metadata(self._fd):
+            if not self._validate_object_metadata():
                 self._create_object_metadata(self._fd)
 
             assert self._metadata is not None
@@ -700,11 +724,10 @@ class DiskFile(object):
 
         return self
 
-    def _validate_object_metadata(self, fd):
-
+    def _validate_object_metadata(self):
         # Has no Swift specific metadata saved as xattr. Probably because
         # object was added/replaced through filesystem interface.
-        if not self._metadata:
+        if not self._metadata and not self._is_dir:
             self._file_has_changed = True
             return False
 
@@ -724,15 +747,16 @@ class DiskFile(object):
                 # Check if the file has been modified through filesystem
                 # interface by comparing mtime stored in xattr during PUT
                 # and current mtime of file.
+                obj_stat = os.stat(self._data_file)
                 if normalize_timestamp(self._metadata[X_MTIME]) != \
-                        normalize_timestamp(self._stat.st_mtime):
+                        normalize_timestamp(obj_stat.st_mtime):
                     self._file_has_changed = True
                     return False
             else:
                 # Without X_MTIME key, comparing md5sum is the only way
                 # to determine if file has changed or not. This is inefficient
                 # but there's no other way!
-                self._etag = get_etag(fd)
+                self._etag = get_etag(self._data_file)
                 if self._etag != self._metadata[X_ETAG]:
                     self._file_has_changed = True
                     return False
@@ -749,7 +773,6 @@ class DiskFile(object):
         return False
 
     def _create_object_metadata(self, fd):
-
         if self._etag is None:
             self._etag = md5().hexdigest() if self._is_dir \
                 else get_etag(fd)
@@ -801,6 +824,23 @@ class DiskFile(object):
                 return True
         return False
 
+    def is_offline(self):
+        try:
+            raw_file_levels = xattr.getxattr(self._data_file,
+                                             "system.hpss.level")
+        except IOError as err:
+            raise SwiftOnFileSystemIOError(
+                err.errno,
+                '%s, xattr.getxattr("system.hpss.level", ...)' % err.strerror
+                )
+        try:
+            file_levels = raw_file_levels.split(";")
+            top_level = file_levels[0].split(':')
+            bytes_on_disk = top_level[2].rstrip(' ')
+        except ValueError:
+            raise SwiftOnFileSystemIOError("Couldn't get system.hpss.level!")
+        return bytes_on_disk != self._stat.st_size
+
     def __enter__(self):
         """
         Context enter.
@@ -848,15 +888,28 @@ class DiskFile(object):
 
     def read_metadata(self):
         """
-        Return the metadata for an object without requiring the caller to open
-        the object first.
+        Return the metadata for an object without opening the object's file on
+        disk.
 
         :returns: metadata dictionary for an object
         :raises DiskFileError: this implementation will raise the same
                             errors as the `open()` method.
         """
-        with self.open():
-            return self.get_metadata()
+        # FIXME: pull a lot of this and the copy of it from open() out to
+        # another function
+
+        # Do not actually open the file, in order to duck hpssfs checksum
+        # validation and resulting timeouts
+        # This means we do a few things DiskFile.open() does.
+        try:
+            self._is_dir = os.path.isdir(self._data_file)
+            self._metadata = read_metadata(self._data_file)
+        except IOError:
+            raise DiskFileNotExist
+        if not self._validate_object_metadata():
+            self._create_object_metadata(self._data_file)
+        self._filter_metadata()
+        return self._metadata
 
     def reader(self, iter_hook=None, keep_cache=False):
         """

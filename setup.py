@@ -1,3 +1,4 @@
+# Copyright (c) 2016 IBM Corporation
 # Copyright (c) 2013 Red Hat, Inc.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
@@ -22,26 +23,27 @@ setup(
     version=_pkginfo.full_version,
     description='SwiftOnHPSS',
     license='Apache License (2.0)',
-    author='IBM & Red Hat, Inc.',
+    author='IBM Corporation; Red Hat, Inc.',
     url='https://github.com/hpss-collaboration/swiftonhpss',
     packages=find_packages(exclude=['test', 'bin']),
     test_suite='nose.collector',
     classifiers=[
-        'Development Status :: 2 - Pre-Alpha'
-        'Environment :: OpenStack'
-        'Intended Audience :: Information Technology'
-        'Intended Audience :: System Administrators'
-        'License :: OSI Approved :: Apache Software License'
-        'Operating System :: POSIX :: Linux'
-        'Programming Language :: Python'
-        'Programming Language :: Python :: 2'
-        'Programming Language :: Python :: 2.6'
+        'Development Status :: 2 - Pre-Alpha',
+        'Environment :: OpenStack',
+        'Intended Audience :: Information Technology',
+        'Intended Audience :: System Administrators',
+        'License :: OSI Approved :: Apache Software License',
+        'Operating System :: POSIX :: Linux',
+        'Programming Language :: Python',
+        'Programming Language :: Python :: 2',
+        'Programming Language :: Python :: 2.6',
         'Programming Language :: Python :: 2.7'
     ],
     install_requires=[],
     scripts=[
         'bin/swiftonhpss-print-metadata',
         'bin/swiftonhpss-migrate-metadata',
+        'bin/swiftonhpss-nstool'
     ],
     entry_points={
         'paste.app_factory': [
