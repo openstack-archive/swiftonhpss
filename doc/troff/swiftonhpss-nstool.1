@@ -1,0 +1,35 @@
+.TH swiftonhpss-nstool 1
+.SH NAME
+swiftonhpss-nstool \- Synchronizes Swift and HPSS namespaces
+.SH SYNOPSIS
+.B swiftonhpss-nstool
+\fB-d\fR \fIDEVICE_PATH\fR
+\fB-k\fR \fIKEYSTONE_URL\fR
+\fB-s\fR \fISTORAGE_URL\fR
+[\fB-u\fR \fIUSERNAME\fR]
+.IR [account]
+.IR [container]
+.SH DESCRIPTION
+.B swiftonhpss-nstool
+synchronizes the Swift container and object metadata with the files that
+actually exist in HPSS. The \fIaccount\fR and \fIcontainer\fR optional arguments
+limit this synchronization to a specified account and container.
+.SH OPTIONS
+.TP
+\fB\-d \fIdevice\fR
+The location of the HPSS FUSE mountpoint Swift uses
+.TP
+\fB\-k \fIkeystone_url\fR
+The Keystone identity service URL to auth into
+.TP
+\fB\-s \fIstorage_url\fR
+The HTTP endpoint URL for SwiftOnHPSS
+.TP
+\fB\-u \fIusername\fR
+The HPSS Keystone admin username
+.SH LIMITATIONS
+.IP \(bu
+The tool only supports the Keystone v2 API for now.
+.IP \(bu
+The tool does not yet do any multiprocessing to speed up processing of the
+file tree.

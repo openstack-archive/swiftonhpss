@@ -16,7 +16,9 @@
 
 from setuptools import setup, find_packages
 from swiftonhpss.swift import _pkginfo
-
+import os
+import sys
+import shutil
 
 setup(
     name=_pkginfo.name,
@@ -55,3 +57,12 @@ setup(
         ],
     },
 )
+
+if 'install' in sys.argv:
+    # Install man pages the crappy hacky way, because setuptools doesn't
+    # have any facility to do it.
+    man_path = '/usr/local/share/man/1'
+    man_pages = filter(lambda x: os.path.isfile('./doc/troff/'+x,
+                       os.listdir('./doc/troff')
+    for page in man_pages:
+        shutil.copyfile('./doc/troff/'+page, man_path)
