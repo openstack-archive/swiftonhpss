@@ -316,7 +316,7 @@ class DiskFileWriter(object):
                 hpssfs.ioctl(self._fd, hpssfs.HPSSFS_PURGE_LOCK, int(purgelock))
             except IOError as err:
                 raise SwiftOnFileSystemIOError(err.errno,
-                                               '%s, hpssfs.ioct("%s", ...)' % (
+                                               '%s, hpssfs.ioctl("%s", ...)' % (
                                                err.strerror, self._fd))
 
         # From the Department of the Redundancy Department, make sure
@@ -839,7 +839,34 @@ class DiskFile(object):
             bytes_on_disk = top_level[2].rstrip(' ')
         except ValueError:
             raise SwiftOnFileSystemIOError("Couldn't get system.hpss.level!")
-        return bytes_on_disk != self._stat.st_size
+        return int(bytes_on_disk) != self._stat.st_size
+
+    def get_hpss_headers(self):
+        header_to_xattr = {'X-HPSS-Account': 'account',
+                           'X-HPSS-Bitfile-ID': 'bitfile',
+                           'X-HPSS-Comment': 'comment',
+                           'X-HPSS-Class-Of-Service-ID': 'cos',
+                           'X-HPSS-Data-Levels': 'level',
+                           'X-HPSS-Family-ID': 'family',
+                           'X-HPSS-Fileset-ID': 'fileset',
+                           'X-HPSS-Optimum-Size': 'optimum',
+                           'X-HPSS-Purgelock-Status': 'purgelock',
+                           'X-HPSS-Reads': 'reads',
+                           'X-HPSS-Realm-ID': 'realm',
+                           'X-HPSS-Subsys-ID': 'subsys',
+                           'X-HPSS-Writes': 'writes', }
+        result = {}
+        for header in header_to_xattr:
+            xattr_to_get = 'system.hpss.%s' % header_to_xattr[header]
+            try:
+                result[header] = xattr.getxattr(self._data_file,
+                                                xattr_to_get)
+            except IOError as err:
+                error_message = "Couldn't get HPSS xattr %s from file %s" \
+                                % (xattr_to_get, self._data_file)
+                logging.error(error_message)
+                raise SwiftOnFileSystemIOError(err.errno, error_message)
+        return result
 
     def __enter__(self):
         """

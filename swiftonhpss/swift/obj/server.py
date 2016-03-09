@@ -17,7 +17,6 @@
 
 import math
 import logging
-import time
 import xattr
 import os
 import hpssfs
@@ -385,7 +384,8 @@ class ObjectController(server.ObjectController):
             pass
 
         try:
-            self._get_hpss_xattr(request, response, disk_file)
+            hpss_headers = disk_file.get_hpss_headers()
+            response.headers.update(hpss_headers)
         except SwiftOnFileSystemIOError:
             return HTTPServiceUnavailable(request=request)
 
@@ -398,6 +398,7 @@ class ObjectController(server.ObjectController):
     @public
     @timing_stats()
     def GET(self, request):
+        logging.error(request)
         """Handle HTTP GET requests for the Swift on File object server"""
         device, partition, account, container, obj, policy = \
             get_name_and_placement(request, 5, 5, True)
@@ -450,7 +451,8 @@ class ObjectController(server.ObjectController):
                 response.headers['X-Backend-Timestamp'] = file_x_ts.internal
                 # (HPSS) Inject HPSS xattr metadata into headers
                 try:
-                    self._get_hpss_xattr(request, response, disk_file)
+                    hpss_headers = disk_file.get_hpss_headers()
+                    response.headers.update(hpss_headers)
                 except SwiftOnFileSystemIOError:
                     return HTTPServiceUnavailable(request=request)
                 return request.get_response(response)
@@ -460,36 +462,6 @@ class ObjectController(server.ObjectController):
                 headers['X-Backend-Timestamp'] = e.timestamp.internal
                 return HTTPNotFound(request=request, headers=headers,
                                     conditional_response=True)
-
-    # TODO: refactor this to live in DiskFile!
-    # Along with all the other HPSS stuff
-    def _get_hpss_xattr(self, request, response, diskfile):
-        attrlist = {'X-HPSS-Account': 'account',
-                    'X-HPSS-BitfileID': 'bitfile',
-                    'X-HPSS-Comment': 'comment',
-                    'X-HPSS-ClassOfServiceID': 'cos',
-                    'X-HPSS-FamilyID': 'family',
-                    'X-HPSS-FilesetID': 'fileset',
-                    'X-HPSS-Bytes': 'level',
-                    'X-HPSS-Reads': 'reads',
-                    'X-HPSS-RealmID': 'realm',
-                    'X-HPSS-SubsysID': 'subsys',
-                    'X-HPSS-Writes': 'writes',
-                    'X-HPSS-OptimumSize': 'optimum',
-                    'X-HPSS-Hash': 'hash',
-                    'X-HPSS-PurgelockStatus': 'purgelock'}
-        for key in request.headers:
-            val = attrlist.get(key, None)
-            if val:
-                attr = 'system.hpss.%s' % val
-                try:
-                    response.headers[key] = \
-                        xattr.getxattr(diskfile._data_file, attr)
-                except IOError as err:
-                    raise SwiftOnFileSystemIOError(
-                        err.errno,
-                        '%s, xattr.getxattr("%s", ...)' % (err.strerror, attr)
-                    )
 
     @public
     @timing_stats()
