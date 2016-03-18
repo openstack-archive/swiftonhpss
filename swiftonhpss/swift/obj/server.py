@@ -398,7 +398,6 @@ class ObjectController(server.ObjectController):
     @public
     @timing_stats()
     def GET(self, request):
-        logging.error(request)
         """Handle HTTP GET requests for the Swift on File object server"""
         device, partition, account, container, obj, policy = \
             get_name_and_placement(request, 5, 5, True)
@@ -460,8 +459,8 @@ class ObjectController(server.ObjectController):
             headers = {}
             if hasattr(e, 'timestamp'):
                 headers['X-Backend-Timestamp'] = e.timestamp.internal
-                return HTTPNotFound(request=request, headers=headers,
-                                    conditional_response=True)
+            return HTTPNotFound(request=request, headers=headers,
+                                conditional_response=True)
 
     @public
     @timing_stats()

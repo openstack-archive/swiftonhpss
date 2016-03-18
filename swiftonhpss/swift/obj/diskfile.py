@@ -397,18 +397,19 @@ class DiskFileWriter(object):
         self.close()
 
         # TODO: see if this is really the right way of getting the ETag
+        # TODO: add timeout in case we should end up never having an ETag
         if not has_etag:
-            sleep(.5)
             try:
-                xattrs = xattr.xattr(df._data_file)
-                if 'system.hpss.hash' in xattrs:
-                    etag = xattrs['system.hpss.hash']
-                elif 'user.hash.checksum' in xattrs:
-                    etag = xattrs['user.hash.checksum']
-                else:
-                    raise DiskFileError(
-                        'ETag was not in HPSS xattrs for file %s'
-                        % df._data_file)
+                etag = None
+                # We sit here and wait until hpssfs-cksum finishes calculating
+                # the checksum.
+                while etag is None:
+                    time.sleep(.25)
+                    xattrs = xattr.xattr(df._data_file)
+                    if 'system.hpss.hash' in xattrs:
+                        etag = xattrs['system.hpss.hash']
+                    elif 'user.hash.checksum' in xattrs:
+                        etag = xattrs['user.hash.checksum']
                 metadata['ETag'] = etag
                 write_metadata(df._data_file, metadata)
             except IOError as err:
