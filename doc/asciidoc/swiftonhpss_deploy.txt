@@ -147,10 +147,12 @@ Install memcached, start the service and make it run on startup.
 [[X4]]
 Install Keystone (if not already existing)
 ------------------------------------------
-IF YOU DO NOT HAVE KEYSTONE YET:
-
 Install OpenStack Keystone, and deploy it following
 this guide: https://docs.openstack.org/kilo/install-guide/yum/content/keystone-install.html
+
+This does not have to be on the same machine that SwiftOnHPSS is on, but it does
+need to be installed on an HPSS client machine if the HPSS Keystone driver is
+desired to use HPSS identities with Swift.
 
 After installing Keystone and verifying that it works using that guide,
 create the service entity and API endpoint, but don't create any users or
