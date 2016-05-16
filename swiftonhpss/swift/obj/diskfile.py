@@ -55,7 +55,7 @@ from swift.obj.diskfile import get_async_dir
 
 # FIXME: Hopefully we'll be able to move to Python 2.7+ where O_CLOEXEC will
 # be back ported. See http://www.python.org/dev/peps/pep-0433/
-O_CLOEXEC = 0o20000000
+O_CLOEXEC = 0o2000000
 
 MAX_RENAME_ATTEMPTS = 10
 MAX_OPEN_ATTEMPTS = 10
@@ -299,7 +299,7 @@ class DiskFileWriter(object):
         df._threadpool.run_in_thread(self._write_entire_chunk, chunk)
         return self._upload_size
 
-    def _finalize_put(self, metadata, purgelock=False, has_etag=True):
+    def _finalize_put(self, metadata, purgelock=False):
         # Write out metadata before fsync() to ensure it is also forced to
         # disk.
         write_metadata(self._fd, metadata)
@@ -309,15 +309,6 @@ class DiskFileWriter(object):
         # the pages (now that after fsync the pages will be all
         # clean).
         do_fsync(self._fd)
-
-        # (HPSS) Purge lock the file now if we're asked to.
-        if purgelock:
-            try:
-                hpssfs.ioctl(self._fd, hpssfs.HPSSFS_PURGE_LOCK, int(purgelock))
-            except IOError as err:
-                raise SwiftOnFileSystemIOError(err.errno,
-                                               '%s, hpssfs.ioctl("%s", ...)' % (
-                                               err.strerror, self._fd))
 
         # From the Department of the Redundancy Department, make sure
         # we call drop_cache() after fsync() to avoid redundant work
@@ -392,33 +383,20 @@ class DiskFileWriter(object):
                 # Success!
                 break
 
+        # (HPSS) Purge lock the file now if we're asked to.
+        if purgelock:
+            try:
+                hpssfs.ioctl(self._fd, hpssfs.HPSSFS_PURGE_LOCK, int(purgelock))
+            except IOError as err:
+                raise SwiftOnFileSystemIOError(err.errno,
+                                               '%s, hpssfs.ioctl("%s", ...)' % (
+                                               err.strerror, self._fd))
+
         # Close here so the calling context does not have to perform this
         # in a thread.
         self.close()
 
-        # TODO: see if this is really the right way of getting the ETag
-        # TODO: add timeout in case we should end up never having an ETag
-        if not has_etag:
-            try:
-                etag = None
-                # We sit here and wait until hpssfs-cksum finishes calculating
-                # the checksum.
-                while etag is None:
-                    time.sleep(.25)
-                    xattrs = xattr.xattr(df._data_file)
-                    if 'system.hpss.hash' in xattrs:
-                        etag = xattrs['system.hpss.hash']
-                    elif 'user.hash.checksum' in xattrs:
-                        etag = xattrs['user.hash.checksum']
-                metadata['ETag'] = etag
-                write_metadata(df._data_file, metadata)
-            except IOError as err:
-                raise DiskFileError(
-                    err.errno,
-                    "Could not get xattrs for file '%s', reason: %s"
-                    % (df._data_file, err.strerror))
-
-    def put(self, metadata, purgelock=False, has_etag=True):
+    def put(self, metadata, purgelock=False):
         """
         Finalize writing the file on disk, and renames it from the temp file
         to the real location.  This should be called after the data has been
@@ -448,7 +426,7 @@ class DiskFileWriter(object):
                                      ' as a directory' % df._data_file)
 
         df._threadpool.force_run_in_thread(self._finalize_put, metadata,
-                                           purgelock, has_etag)
+                                           purgelock)
 
         # Avoid the unlink() system call as part of the mkstemp context
         # cleanup
@@ -838,11 +816,13 @@ class DiskFile(object):
             file_levels = raw_file_levels.split(";")
             top_level = file_levels[0].split(':')
             bytes_on_disk = top_level[2].rstrip(' ')
+            if bytes_on_disk == 'nodata':
+                bytes_on_disk = '0'
         except ValueError:
             raise SwiftOnFileSystemIOError("Couldn't get system.hpss.level!")
         return int(bytes_on_disk) != self._stat.st_size
 
-    def get_hpss_headers(self):
+    def read_hpss_system_metadata(self):
         header_to_xattr = {'X-HPSS-Account': 'account',
                            'X-HPSS-Bitfile-ID': 'bitfile',
                            'X-HPSS-Comment': 'comment',
@@ -916,28 +896,15 @@ class DiskFile(object):
 
     def read_metadata(self):
         """
-        Return the metadata for an object without opening the object's file on
-        disk.
+        Return the metadata for an object without requiring the caller to open
+        the object first.
 
         :returns: metadata dictionary for an object
         :raises DiskFileError: this implementation will raise the same
                             errors as the `open()` method.
         """
-        # FIXME: pull a lot of this and the copy of it from open() out to
-        # another function
-
-        # Do not actually open the file, in order to duck hpssfs checksum
-        # validation and resulting timeouts
-        # This means we do a few things DiskFile.open() does.
-        try:
-            self._is_dir = os.path.isdir(self._data_file)
-            self._metadata = read_metadata(self._data_file)
-        except IOError:
-            raise DiskFileNotExist
-        if not self._validate_object_metadata():
-            self._create_object_metadata(self._data_file)
-        self._filter_metadata()
-        return self._metadata
+        with self.open():
+            return self.get_metadata()
 
     def reader(self, iter_hook=None, keep_cache=False):
         """
@@ -1032,13 +999,13 @@ class DiskFile(object):
         temporary file again. If we get file name conflict, we'll retry using
         different random suffixes 1,000 times before giving up.
 
-        :param cos:
         .. note::
 
             An implementation is not required to perform on-disk
             preallocations even if the parameter is specified. But if it does
             and it fails, it must raise a `DiskFileNoSpace` exception.
 
+        :param cos:
         :param size: optional initial size of file to explicitly allocate on
                      disk
         :raises DiskFileNoSpace: if a size is specified and allocation fails
@@ -1074,7 +1041,7 @@ class DiskFile(object):
                         raise SwiftOnFileSystemIOError(err.errno,
                                                        '%s, hpssfs.ioctl("%s", SET_COS)' % (
                                                        err.strerror, fd))
-                elif size:
+                if size:
                     try:
                         hpssfs.ioctl(fd, hpssfs.HPSSFS_SET_FSIZE_HINT,
                                      long(size))

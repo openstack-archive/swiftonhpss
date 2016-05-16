@@ -78,7 +78,6 @@ class ObjectController(server.ObjectController):
         # Replaces Swift's DiskFileRouter object reference with ours.
         self._diskfile_router = SwiftOnFileDiskFileRouter(conf, self.logger)
         self.swift_dir = conf.get('swift_dir', '/etc/swift')
-        self.handle_md5 = conf.get('handle_md5', False)
         self.container_ring = None
         # This conf option will be deprecated and eventualy removed in
         # future releases
@@ -153,21 +152,18 @@ class ObjectController(server.ObjectController):
             orig_delete_at = int(orig_metadata.get('X-Delete-At') or 0)
             upload_expiration = time.time() + self.max_upload_time
 
-            if self.handle_md5:
-                etag = md5()
+            etag = md5()
             elapsed_time = 0
 
             # (HPSS) Check for HPSS-specific metadata headers
-            cos = request.headers.get('X-Object-Meta-COS')
-            purgelock = request.headers.get('X-Object-Meta-PurgeLock')
+            cos = request.headers.get('X-HPSS-Class-Of-Service-ID', None)
+            purgelock = request.headers.get('X-HPSS-Purgelock-Status', 'false')
+            purgelock = purgelock.lower() in ['true', '1', 'yes']
 
             try:
                 # Feed DiskFile our HPSS-specific stuff
                 with disk_file.create(size=fsize, cos=cos) as writer:
                     upload_size = 0
-                    # FIXME: Need to figure out how to store MIME type
-                    # information, to retrieve with a GET later! Or if
-                    # this has already been done for us.
 
                     def timeout_reader():
                         with ChunkReadTimeout(self.client_timeout):
@@ -180,8 +176,7 @@ class ObjectController(server.ObjectController):
                             if start_time > upload_expiration:
                                 self.logger.increment('PUT.timeouts')
                                 return HTTPRequestTimeout(request=request)
-                            if self.handle_md5:
-                                etag.update(chunk)
+                            etag.update(chunk)
                             upload_size = writer.write(chunk)
                             elapsed_time += time.time() - start_time
                     except ChunkReadTimeout:
@@ -191,10 +186,8 @@ class ObjectController(server.ObjectController):
                                                   elapsed_time, upload_size)
                     if fsize and fsize != upload_size:
                         return HTTPClientDisconnect(request=request)
-                    if self.handle_md5:
-                        etag = etag.hexdigest()
-                    else:
-                        etag = ''
+                    etag = etag.hexdigest()
+
                     if 'etag' in request.headers \
                             and request.headers['etag'].lower() != etag:
                         return HTTPUnprocessableEntity(request=request)
@@ -215,41 +208,44 @@ class ObjectController(server.ObjectController):
                             header_caps = header_key.title()
                             metadata[header_caps] = request.headers[header_key]
 
-                    # (HPSS) Purge lock the file
-                    writer.put(metadata, purgelock=purgelock,
-                               has_etag=self.handle_md5)
+                    # (HPSS) Write the file, with added options
+                    writer.put(metadata, purgelock=purgelock)
 
             except DiskFileNoSpace:
                 return HTTPInsufficientStorage(drive=device, request=request)
-            except SwiftOnFileSystemIOError:
+            except SwiftOnFileSystemIOError as e:
+                logging.debug('IOError in writing file')
                 return HTTPServiceUnavailable(request=request)
 
             # FIXME: this stuff really should be handled in DiskFile somehow?
-            if self.handle_md5:
-                # (HPSS) Set checksum on file ourselves, if hpssfs won't do it
-                # for us.
+            # we set the hpss checksum in here, so both systems have valid
+            # and current checksum metadata
+
+            # (HPSS) Set checksum on file ourselves, if hpssfs won't do it
+            # for us.
+            data_file = disk_file._data_file
+            try:
+                xattr.setxattr(data_file, 'system.hpss.hash',
+                               "md5:%s" % etag)
+            except IOError:
+                logging.debug("Could not write ETag to system.hpss.hash,"
+                              " trying user.hash.checksum")
                 try:
-                    xattr.setxattr(disk_file._data_file, 'system.hpss.hash',
-                                   "md5:%s" % etag)
-                except IOError:
-                    logging.debug("Could not write ETag to system.hpss.hash,"
-                                  " trying user.hash.checksum")
-                    try:
-                        xattr.setxattr(disk_file._data_file,
-                                       'user.hash.checksum', etag)
-                        xattr.setxattr(disk_file._data_file,
-                                       'user.hash.algorithm', 'md5')
-                        xattr.setxattr(disk_file._data_file,
-                                       'user.hash.state', 'Valid')
-                        xattr.setxattr(disk_file._data_file,
-                                       'user.hash.filesize', str(upload_size))
-                        xattr.setxattr(disk_file._data_file,
-                                       'user.hash.app', 'swiftonhpss')
-                    except IOError as err:
-                        raise SwiftOnFileSystemIOError(
-                            err.errno,
-                            'Could not write MD5 checksum to HPSS filesystem: '
-                            '%s' % err.strerror)
+                    xattr.setxattr(data_file,
+                                   'user.hash.checksum', etag)
+                    xattr.setxattr(data_file,
+                                   'user.hash.algorithm', 'md5')
+                    xattr.setxattr(data_file,
+                                   'user.hash.state', 'Valid')
+                    xattr.setxattr(data_file,
+                                   'user.hash.filesize', str(upload_size))
+                    xattr.setxattr(data_file,
+                                   'user.hash.app', 'swiftonhpss')
+                except IOError as err:
+                    raise SwiftOnFileSystemIOError(
+                        err.errno,
+                        'Could not write MD5 checksum to HPSS filesystem: '
+                        '%s' % err.strerror)
 
             # Update container metadata
             if orig_delete_at != new_delete_at:
@@ -277,6 +273,7 @@ class ObjectController(server.ObjectController):
                 self._object_symlink(request, disk_file._data_file, device,
                                      account)
             except SwiftOnFileSystemOSError:
+                logging.debug('could not make account symlink')
                 return HTTPServiceUnavailable(request=request)
             return HTTPCreated(request=request, etag=etag)
 
@@ -373,7 +370,7 @@ class ObjectController(server.ObjectController):
                 response.headers[key] = value
         response.etag = metadata['ETag']
         ts = Timestamp(metadata['X-Timestamp'])
-
+        response.last_modified = math.ceil(float(ts))
         # Needed for container sync feature
         response.headers['X-Timestamp'] = ts.normal
         response.headers['X-Backend-Timestamp'] = ts.internal
@@ -383,11 +380,15 @@ class ObjectController(server.ObjectController):
         except KeyError:
             pass
 
-        try:
-            hpss_headers = disk_file.get_hpss_headers()
-            response.headers.update(hpss_headers)
-        except SwiftOnFileSystemIOError:
-            return HTTPServiceUnavailable(request=request)
+        # (HPSS) Inject HPSS xattr metadata into headers
+        want_hpss_metadata = request.headers.get('X-HPSS-Get-Metadata',
+                                                 False)
+        if config_true_value(want_hpss_metadata):
+            try:
+                hpss_headers = disk_file.read_hpss_system_metadata()
+                response.headers.update(hpss_headers)
+            except SwiftOnFileSystemIOError:
+                return HTTPServiceUnavailable(request=request)
 
         if 'X-Object-Sysmeta-Update-Container' in response.headers:
             self._sof_container_update(request, response)
@@ -449,11 +450,14 @@ class ObjectController(server.ObjectController):
                 response.headers['X-Timestamp'] = file_x_ts.normal
                 response.headers['X-Backend-Timestamp'] = file_x_ts.internal
                 # (HPSS) Inject HPSS xattr metadata into headers
-                try:
-                    hpss_headers = disk_file.get_hpss_headers()
-                    response.headers.update(hpss_headers)
-                except SwiftOnFileSystemIOError:
-                    return HTTPServiceUnavailable(request=request)
+                want_hpss_metadata = request.headers.get('X-HPSS-Get-Metadata',
+                                                         False)
+                if config_true_value(want_hpss_metadata):
+                    try:
+                        hpss_headers = disk_file.read_hpss_system_metadata()
+                        response.headers.update(hpss_headers)
+                    except SwiftOnFileSystemIOError:
+                        return HTTPServiceUnavailable(request=request)
                 return request.get_response(response)
         except (DiskFileNotExist, DiskFileQuarantined) as e:
             headers = {}
@@ -482,11 +486,23 @@ class ObjectController(server.ObjectController):
             return HTTPInsufficientStorage(drive=device, request=request)
 
         # Set Purgelock status if we got it
-        purgelock = request.headers.get('X-Object-Meta-PurgeLock')
+        purgelock = request.headers.get('X-HPSS-Purgelock-Status')
         if purgelock:
             try:
                 hpssfs.ioctl(disk_file._fd, hpssfs.HPSSFS_PURGE_LOCK,
                              int(purgelock))
+            except IOError as err:
+                raise SwiftOnFileSystemIOError(
+                    err.errno,
+                    '%s, xattr.getxattr("%s", ...)' %
+                    (err.strerror, disk_file._fd))
+
+        # Set class of service if we got it
+        cos = request.headers.get('X-HPSS-Class-Of-Service-ID')
+        if cos:
+            try:
+                hpssfs.ioctl(disk_file._fd, hpssfs.HPSSFS_SET_COS_HINT,
+                             int(cos))
             except IOError as err:
                 raise SwiftOnFileSystemIOError(
                     err.errno,
@@ -548,12 +564,12 @@ class ObjectController(server.ObjectController):
             orig_metadata = {}
             response_class = HTTPNotFound
 
-        # If the file got deleted outside of Swift, we won't see it. So just say
-        # it got deleted, even if it never existed in the first place.
+        # If the file got deleted outside of Swift, we won't see it.
+        # So we say "file, what file?" and delete it from the container.
         except DiskFileNotExist:
             orig_timestamp = 0
             orig_metadata = {}
-            response_class = HTTPNoContent
+            response_class = HTTPNotFound
         except DiskFileQuarantined:
             orig_timestamp = 0
             orig_metadata = {}
