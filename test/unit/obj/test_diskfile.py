@@ -193,7 +193,6 @@ class TestDiskFile(unittest.TestCase):
             'Content-Length': 4,
             'ETag': etag,
             'X-Timestamp': ts,
-            'X-Object-PUT-Mtime': normalize_timestamp(stats.st_mtime),
             'X-Object-Sysmeta-Update-Container': True,
             'Content-Type': 'application/octet-stream'}
         gdf = self._get_diskfile("vol0", "p57", "ufo47", "bar", "z")

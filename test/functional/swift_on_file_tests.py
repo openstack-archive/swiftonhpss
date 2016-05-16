@@ -25,6 +25,8 @@ from test.functional.swift_test_client import Account, Connection, \
     ResponseError
 import test.functional as tf
 
+# PGB - changed 'AUTH_' hardcoded reseller prefix to 'KEY_'.
+# TODO: read Swift proxy config for this
 
 class TestSwiftOnFileEnv:
     @classmethod
@@ -33,7 +35,10 @@ class TestSwiftOnFileEnv:
         cls.conn.authenticate()
         cls.account = Account(cls.conn, tf.config.get('account',
                                                       tf.config['username']))
-        cls.root_dir = os.path.join('/mnt/swiftonhpss/test')
+
+        # PGB - change hardcoded SoF mountpoint
+        #cls.root_dir = os.path.join('/mnt/swiftonhpss/test')
+        cls.root_dir = os.path.join('/srv/swift/hpss')
         cls.account.delete_containers()
 
         cls.file_size = 8
@@ -89,8 +94,8 @@ class TestSwiftOnFile(Base):
     @classmethod
     def tearDownClass(self):
         self.env.account.delete_containers()
-        for account_dir in os.listdir(self.env.root_dir):
-            rmtree(os.path.join(self.env.root_dir, account_dir))
+        #for account_dir in os.listdir(self.env.root_dir):
+        #    rmtree(os.path.join(self.env.root_dir, account_dir))
 
     def testObjectsFromMountPoint(self):
         found_files = []
@@ -106,7 +111,7 @@ class TestSwiftOnFile(Base):
                     found_dirs.append(file)
                 elif os.path.isfile(os.path.join(path, file)):
                     filename = os.path.join(os.path.relpath(path, os.path.join(
-                        self.env.root_dir, 'AUTH_' + self.env.account.name,
+                        self.env.root_dir, self.env.account.name,
                         self.env.container.name)), file)
                     if re.match('^[\.]', filename):
                         filename = filename[2:]
@@ -115,7 +120,7 @@ class TestSwiftOnFile(Base):
                     pass  # Just a Place holder
 
         recurse_path(os.path.join(self.env.root_dir,
-                                  'AUTH_' + self.env.account.name,
+                                  self.env.account.name,
                                   self.env.container.name))
         for file in self.env.stored_files:
                 self.assert_(file in found_files)
@@ -129,7 +134,7 @@ class TestSwiftOnFile(Base):
         file_info = file_item.info()
         fhOnMountPoint = open(os.path.join(
                               self.env.root_dir,
-                              'AUTH_' + self.env.account.name,
+                              self.env.account.name,
                               self.env.container.name,
                               file_name), 'r')
         data_read_from_mountP = fhOnMountPoint.read()
@@ -142,7 +147,7 @@ class TestSwiftOnFile(Base):
 
         # Create a file over mountpoint
         file_path = os.path.join(self.env.root_dir,
-                                 'AUTH_' + self.env.account.name,
+                                 self.env.account.name,
                                  self.env.container.name, file_name)
 
         data = "I'm whatever Gotham needs me to be."
@@ -196,7 +201,7 @@ class TestSwiftOnFile(Base):
 
         # Extend/append more data to file from filesystem interface
         file_path = os.path.join(self.env.root_dir,
-                                 'AUTH_' + self.env.account.name,
+                                 self.env.account.name,
                                  self.env.container.name,
                                  object_name)
         more_data = "- Batman"
