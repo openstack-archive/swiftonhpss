@@ -1,7 +1,5 @@
 # Quick Start Guide
 
-TODO: Update this for SwiftOnHPSS specifics!
-
 ## Contents
 * [Overview](#overview)
 * [System Setup](#system_setup)
@@ -13,33 +11,31 @@ TODO: Update this for SwiftOnHPSS specifics!
 ## Overview
 SwiftOnFile allows any POSIX compliant filesystem (which supports extended attributes) to be used as the backend to OpenStack Swift (Object Store).
 
-The following guide assumes you have a running [OpenStack Swift SAIO setup][], and you want to extend this setup to try SwiftOnFile as Storage Policy with an XFS partition or GlusterFS volume. This will get you quickly started with a SwiftOnFile deployment on a Fedora or RHEL/CentOS system. 
+The following guide assumes you have a running [OpenStack Swift SAIO setup][], and you want to extend this setup to try SwiftOnHPSS as Storage Policy. This will get you quickly started with a SwiftOnHPSS deployment on an HPSS client running RHEL.
 
-This guide will not provide detailed information on how to prepare a SAIO setup or how to create a gluster volume (or other FS).This guide assumes you know about these technologies; if you require any help in setting those please refer to the links provided.
+This guide will not provide detailed information on how to prepare a SAIO setup. This guide assumes you know about these technologies; if you require any help in setting those please refer to the links provided.
 
 <a name="system_setup" />
 ## System Setup
 
-### Prerequisites on CentOS/RHEL
+### Prerequisites on RHEL
 
 1. SAIO deployment (this guide uses SAIO on Fedora 20) running Swift 2.0 or newer versions
-1. One XFS partition/GlusterFS volume mounted as `/mnt/swiftonfile`
+2. One HPSS FUSE mountpoint at some subdirectory in `/mnt/swiftonhpss`
 
->Note: Each XFS partition/GlusterFS volume will be defined as a separate storage policy. 
+### Install SwiftOnHPSS
 
-### Install SwiftOnfile
-
-1. `cd $HOME; git clone https://github.com/openstack/swiftonfile.git`
-1. `cd $HOME/swiftonfile; python setup.py develop; cd $HOME`
+1. `cd $HOME; git clone https://github.com/openstack/swiftonhpss.git`
+2. `cd $HOME/swiftonfile; python setup.py develop; cd $HOME`
  
-### Configure SwiftOnFile as Storage Policy
+### Configure SwiftOnHPSS as Storage Policy
 
 #### Object Server Configuration
 An SAIO setup emulates a four node swift setup and should have four object server running. Add another object server for SwiftOnFile DiskFile API implementation by setting the following configurations in the file /etc/swift/object-server/5.conf:
 
 ~~~
 [DEFAULT]
-devices = /mnt/swiftonfile
+devices = /mnt/swiftonhpss
 mount_check = false
 bind_port = 6050
 max_clients = 1024
@@ -50,16 +46,16 @@ disable_fallocate = true
 pipeline = object-server
 
 [app:object-server]
-use = egg:swiftonfile#object
+use = egg:swiftonhpss#object
 user = <your-user-name>
 log_facility = LOG_LOCAL2
 log_level = DEBUG
 log_requests = on
 disk_chunk_size = 65536
 ~~~
->Note: The parameter 'devices' tells about the path where your xfs partition or glusterfs volume is mounted. The sub directory under which your xfs partition or glusterfs volume is mounted will be called device name. 
+>Note: The parameter 'devices' tells about the path where your HPSS FUSE mountpoint is. The sub directory under which your HPSS mountpoint is will be called the device name. 
 
->For example: You have a xfs formated partition /dev/sdb1, and you mounted it under /mnt/swiftonfile/vol, then your device name would be 'vol' & and the parameter 'devices' would contain value '/mnt/swiftonfile'.
+>For example: You have a xfs formated partition /dev/sdb1, and you mounted it under /mnt/swiftonhpss/main, then your device name would be 'main' & and the parameter 'devices' would contain value '/mnt/swiftonhpss'.
 
 #### Setting SwiftOnFile as storage policy
 Edit /etc/swift.conf to add swiftonfile as a storage policy:
@@ -73,9 +69,9 @@ default = yes
 name = silver
 
 [storage-policy:2]
-name = swiftonfile
+name = swiftonhpss
 ~~~
-You can also make "swiftonfile" the default storage policy by using the 'default' parameter.
+You can also make "swiftonhpss" the default storage policy by using the 'default' parameter.
 
 #### Prepare rings
 Edit the remakerings script to prepare rings for this new storage policy:
@@ -100,7 +96,7 @@ swift-init main restart
 
 <a name="using_swift" />
 
-## Using SwiftOnFile
+## Using SwiftOnHPSS
 It is assumed that you are still using 'tempauth' as authentication method, which is default in SAIO deployment.
 
 #### Get the token
@@ -113,7 +109,7 @@ Use 'X-Auth-Token' & 'X-Storage-Url' returned in above request for all subsequen
 Create a container using the following command:
 
 ~~~
-curl -v -X PUT -H 'X-Auth-Token: AUTH_XXXX' -H 'X-Storage-Policy: swiftonfile' http://localhost:8080/v1/AUTH_test/mycontainer
+curl -v -X PUT -H 'X-Auth-Token: AUTH_XXXX' -H 'X-Storage-Policy: swiftonhpss' http://localhost:8080/v1/AUTH_test/mycontainer
 ~~~
 
 It should return `HTTP/1.1 201 Created` on a successful creation. 
@@ -130,7 +126,7 @@ To confirm that the object has been written correctly, you can compare the
 test file with the object you created:
 
 ~~~
-cat /mnt/swiftonfile/vol/AUTH_test/mycontainer/mytestfile
+cat /mnt/swiftonhpss/vol/AUTH_test/mycontainer/mytestfile
 ~~~
 
 #### Request the object
@@ -147,7 +143,7 @@ and compare it with md5sum of the file on your filesystem.
 
 <a name="what_now" />
 ## What now?
-You now have a single node SwiftOnFile setup ready, next sane step is a multinode swift and SwiftOnFile setup. It is recomended to have a look at [OpenStack Swift deployment guide][] & [Multiple Server Swift Installation][].If you now consider yourself familiar with a typical 4-5 node swift setup, you are good to extent this setup further and add SwiftOnFile DiskFile implementation as a Storage Policy to it. If you want to use SwiftOnFile on a gluster volume, it would be good to have a seprate gluster cluster. We would love to hear about any deployment scenarios involving SOF.
+You now have a single node SwiftOnHPSS setup ready, next sane step is a multinode swift and SwiftOnHPSS setup. It is recomended to have a look at [OpenStack Swift deployment guide][] & [Multiple Server Swift Installation][].If you now consider yourself familiar with a typical 4-5 node Swift setup, you are good to extend this setup further and add SwiftOnHPSS DiskFile implementation as a Storage Policy to it.
     
 For more information, please visit the following links:
 * [OpenStack Swift deployment guide][]

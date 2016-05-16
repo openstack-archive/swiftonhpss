@@ -1,10 +1,11 @@
 # Developer Guide
 
-This guide is for SwiftOnFile development. IBM does not actually have a Jenkins
-or Gerrit set up yet for SwiftOnHPSS.
+This guide was originally for SwiftOnFile development.
+
+We do not have a CI system set up yet, but hope to soon.
 
 ## Development Environment Setup
-The workflow for SwiftOnFile is largely based upon the [OpenStack Gerrit Workflow][].
+The workflow for SwiftOnHPSS will be largely based upon the [OpenStack Gerrit Workflow][].
 
 ## Account Setup
 Please follow the guidelines at [OpenStack Gerrit Workflow][] to do the following:
@@ -42,14 +43,14 @@ git config --global user.email "your_email@youremail.com"
 ### Clone the source
 You can clone the swiftonfile repo from Gerrit:
 ~~~
-git clone ssh://<your-gerrit-username>@review.openstack.org:29418/openstack/swiftonfile
+git clone ssh://<your-gerrit-username>@review.openstack.org:29418/openstack/swiftonhpss
 ~~~
 
 Alternatively, if you just want to clone the source for trying things out,
 without setting up lp or Gerrit account or SSH keys, you can clone from the
 github mirror.
 ~~~
-git clone https://github.com/openstack/swiftonfile
+git clone https://github.com/openstack/swiftonhpss
 ~~~
 
 ### Git Review
@@ -82,7 +83,7 @@ If there is no output, then everything is setup correctly.  If the output
 contains the string *We don't know where your gerrit is*, then you need to
 manually setup a remote repo with the name `gerrit`.
 ~~~
-git remote add gerrit ssh://<your-gerrit-username>@review.openstack.org:29418/openstack/swiftonfile
+git remote add gerrit ssh://<your-gerrit-username/@review.openstack.org:29418/openstack/swiftonhpss
 git remote -v
 ~~~
 
