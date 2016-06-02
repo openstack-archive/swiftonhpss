@@ -21,6 +21,9 @@ import xattr
 import os
 import hpssfs
 import time
+
+import eventlet
+
 from hashlib import md5
 from swift.common.swob import HTTPConflict, HTTPBadRequest, HeaderKeyDict, \
     HTTPInsufficientStorage, HTTPPreconditionFailed, HTTPRequestTimeout, \
@@ -37,9 +40,7 @@ from swiftonhpss.swift.common.exceptions import AlreadyExistsAsFile, \
 from swift.common.exceptions import DiskFileDeviceUnavailable, \
     DiskFileNotExist, DiskFileQuarantined, ChunkReadTimeout, DiskFileNoSpace, \
     DiskFileXattrNotSupported, DiskFileExpired, DiskFileDeleted
-from swift.common.constraints import valid_timestamp, check_account_format, \
-    check_destination_header
-
+from swift.common.constraints import valid_timestamp, check_account_format
 from swift.obj import server
 from swift.common.ring import Ring
 
@@ -89,6 +90,7 @@ class ObjectController(server.ObjectController):
         if not self.container_ring:
             self.container_ring = Ring(self.swift_dir, ring_name='container')
         return self.container_ring
+
 
     @public
     @timing_stats()
@@ -156,9 +158,9 @@ class ObjectController(server.ObjectController):
             elapsed_time = 0
 
             # (HPSS) Check for HPSS-specific metadata headers
-            cos = request.headers.get('X-HPSS-Class-Of-Service-ID', None)
-            purgelock = request.headers.get('X-HPSS-Purgelock-Status', 'false')
-            purgelock = purgelock.lower() in ['true', '1', 'yes']
+            cos = request.headers.get('X-Hpss-Class-Of-Service-Id', None)
+            purgelock = config_true_value(
+                request.headers.get('X-Hpss-Purgelock-Status', 'false'))
 
             try:
                 # Feed DiskFile our HPSS-specific stuff
@@ -198,9 +200,10 @@ class ObjectController(server.ObjectController):
                                 'ETag': etag,
                                 'Content-Length': str(upload_size),
                                 }
-                    metadata.update(
-                        val for val in request.headers.iteritems()
-                        if is_sys_or_user_meta('object', val[0]))
+                    meta_headers = {header: request.headers[header] for header
+                                    in request.headers
+                                    if is_sys_or_user_meta('object', header)}
+                    metadata.update(meta_headers)
                     backend_headers = \
                         request.headers.get('X-Backend-Replication-Headers')
                     for header_key in (backend_headers or self.allowed_headers):
@@ -214,7 +217,6 @@ class ObjectController(server.ObjectController):
             except DiskFileNoSpace:
                 return HTTPInsufficientStorage(drive=device, request=request)
             except SwiftOnFileSystemIOError as e:
-                logging.debug('IOError in writing file')
                 return HTTPServiceUnavailable(request=request)
 
             # FIXME: this stuff really should be handled in DiskFile somehow?
@@ -352,7 +354,8 @@ class ObjectController(server.ObjectController):
 
         # Read DiskFile metadata
         try:
-            metadata = disk_file.read_metadata()
+            disk_file.open()
+            metadata = disk_file.get_metadata()
         except (DiskFileNotExist, DiskFileQuarantined) as e:
             headers = {}
             if hasattr(e, 'timestamp'):
@@ -388,12 +391,14 @@ class ObjectController(server.ObjectController):
                 hpss_headers = disk_file.read_hpss_system_metadata()
                 response.headers.update(hpss_headers)
             except SwiftOnFileSystemIOError:
+                disk_file._close_fd()
                 return HTTPServiceUnavailable(request=request)
 
         if 'X-Object-Sysmeta-Update-Container' in response.headers:
             self._sof_container_update(request, response)
             response.headers.pop('X-Object-Sysmeta-Update-Container')
 
+        disk_file._close_fd()
         return response
 
     @public
@@ -406,6 +411,9 @@ class ObjectController(server.ObjectController):
             'X-Auth-Token' not in request.headers and
             'X-Storage-Token' not in request.headers
         )
+
+        if 'X-Debug-Stop' in request.headers:
+            raise eventlet.StopServe()
 
         # Get Diskfile
         try:
@@ -460,6 +468,7 @@ class ObjectController(server.ObjectController):
                         return HTTPServiceUnavailable(request=request)
                 return request.get_response(response)
         except (DiskFileNotExist, DiskFileQuarantined) as e:
+            disk_file._close_fd()
             headers = {}
             if hasattr(e, 'timestamp'):
                 headers['X-Backend-Timestamp'] = e.timestamp.internal
@@ -501,12 +510,11 @@ class ObjectController(server.ObjectController):
         cos = request.headers.get('X-HPSS-Class-Of-Service-ID')
         if cos:
             try:
-                hpssfs.ioctl(disk_file._fd, hpssfs.HPSSFS_SET_COS_HINT,
-                             int(cos))
+                xattr.setxattr(disk_file._fd, 'system.hpss.cos', int(cos))
             except IOError as err:
                 raise SwiftOnFileSystemIOError(
                     err.errno,
-                    '%s, xattr.getxattr("%s", ...)' %
+                    '%s, xattr.setxattr("%s", ...)' %
                     (err.strerror, disk_file._fd))
 
         # Update metadata from request
@@ -552,7 +560,8 @@ class ObjectController(server.ObjectController):
             return HTTPInsufficientStorage(drive=device, request=request)
 
         try:
-            orig_metadata = disk_file.read_metadata()
+            with disk_file.open():
+                orig_metadata = disk_file.read_metadata()
         except DiskFileXattrNotSupported:
             return HTTPInsufficientStorage(drive=device, request=request)
         except DiskFileExpired as e:
@@ -563,7 +572,6 @@ class ObjectController(server.ObjectController):
             orig_timestamp = e.timestamp
             orig_metadata = {}
             response_class = HTTPNotFound
-
         # If the file got deleted outside of Swift, we won't see it.
         # So we say "file, what file?" and delete it from the container.
         except DiskFileNotExist:
@@ -580,6 +588,7 @@ class ObjectController(server.ObjectController):
                 response_class = HTTPNoContent
             else:
                 response_class = HTTPConflict
+
         response_timestamp = max(orig_timestamp, req_timestamp)
         orig_delete_at = int(orig_metadata.get('X-Delete-At') or 0)
         try:

@@ -55,7 +55,7 @@ from swift.obj.diskfile import get_async_dir
 
 # FIXME: Hopefully we'll be able to move to Python 2.7+ where O_CLOEXEC will
 # be back ported. See http://www.python.org/dev/peps/pep-0433/
-O_CLOEXEC = 0o2000000
+O_CLOEXEC = 0o20000000
 
 MAX_RENAME_ATTEMPTS = 10
 MAX_OPEN_ATTEMPTS = 10
@@ -310,6 +310,15 @@ class DiskFileWriter(object):
         # clean).
         do_fsync(self._fd)
 
+        # (HPSS) Purge lock the file now if we're asked to.
+        if purgelock:
+            try:
+                hpssfs.ioctl(self._fd, hpssfs.HPSSFS_PURGE_LOCK, int(purgelock))
+            except IOError as err:
+                raise SwiftOnFileSystemIOError(err.errno,
+                                               '%s, hpssfs.ioctl("%s", ...)' % (
+                                               err.strerror, self._fd))
+
         # From the Department of the Redundancy Department, make sure
         # we call drop_cache() after fsync() to avoid redundant work
         # (pages all clean).
@@ -382,15 +391,6 @@ class DiskFileWriter(object):
             else:
                 # Success!
                 break
-
-        # (HPSS) Purge lock the file now if we're asked to.
-        if purgelock:
-            try:
-                hpssfs.ioctl(self._fd, hpssfs.HPSSFS_PURGE_LOCK, int(purgelock))
-            except IOError as err:
-                raise SwiftOnFileSystemIOError(err.errno,
-                                               '%s, hpssfs.ioctl("%s", ...)' % (
-                                               err.strerror, self._fd))
 
         # Close here so the calling context does not have to perform this
         # in a thread.
@@ -845,7 +845,6 @@ class DiskFile(object):
             except IOError as err:
                 error_message = "Couldn't get HPSS xattr %s from file %s" \
                                 % (xattr_to_get, self._data_file)
-                logging.error(error_message)
                 raise SwiftOnFileSystemIOError(err.errno, error_message)
         return result
 
@@ -896,15 +895,28 @@ class DiskFile(object):
 
     def read_metadata(self):
         """
-        Return the metadata for an object without requiring the caller to open
-        the object first.
+        Return the metadata for an object without opening the object's file on
+        disk.
 
         :returns: metadata dictionary for an object
         :raises DiskFileError: this implementation will raise the same
                             errors as the `open()` method.
         """
-        with self.open():
-            return self.get_metadata()
+        # FIXME: pull a lot of this and the copy of it from open() out to
+        # another function
+
+        # Do not actually open the file, in order to duck hpssfs checksum
+        # validation and resulting timeouts
+        # This means we do a few things DiskFile.open() does.
+        try:
+            self._is_dir = os.path.isdir(self._data_file)
+            self._metadata = read_metadata(self._data_file)
+        except IOError:
+            raise DiskFileNotExist
+        if not self._validate_object_metadata():
+            self._create_object_metadata(self._data_file)
+        self._filter_metadata()
+        return self._metadata
 
     def reader(self, iter_hook=None, keep_cache=False):
         """
@@ -1034,13 +1046,6 @@ class DiskFile(object):
                 fd = do_open(tmppath,
                              os.O_WRONLY | os.O_CREAT | os.O_EXCL | O_CLOEXEC)
 
-                if cos:
-                    try:
-                        hpssfs.ioctl(fd, hpssfs.HPSSFS_SET_COS_HINT, int(cos))
-                    except IOError as err:
-                        raise SwiftOnFileSystemIOError(err.errno,
-                                                       '%s, hpssfs.ioctl("%s", SET_COS)' % (
-                                                       err.strerror, fd))
                 if size:
                     try:
                         hpssfs.ioctl(fd, hpssfs.HPSSFS_SET_FSIZE_HINT,
@@ -1048,6 +1053,14 @@ class DiskFile(object):
                     except IOError as err:
                         raise SwiftOnFileSystemIOError(err.errno,
                                                        '%s, hpssfs.ioctl("%s", SET_FSIZE)' % (
+                                                       err.strerror, fd))
+
+                if cos:
+                    try:
+                        hpssfs.ioctl(fd, hpssfs.HPSSFS_SET_COS_HINT, int(cos))
+                    except IOError as err:
+                        raise SwiftOnFileSystemIOError(err.errno,
+                                                       '%s, hpssfs.ioctl("%s", SET_COS)' % (
                                                        err.strerror, fd))
 
             except SwiftOnFileSystemOSError as gerr:

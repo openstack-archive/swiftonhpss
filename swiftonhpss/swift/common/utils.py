@@ -32,6 +32,7 @@ from swiftonhpss.swift.common.fs_utils import do_stat, \
     do_walk, do_rmdir, do_log_rl, get_filename_from_fd, do_open, \
     do_getxattr, do_setxattr, do_removexattr, do_read, \
     do_close, do_dup, do_lseek, do_fstat, do_fsync, do_rename
+from urllib import quote, unquote
 
 X_CONTENT_TYPE = 'Content-Type'
 X_CONTENT_LENGTH = 'Content-Length'
@@ -105,15 +106,17 @@ pickle.loads = SafeUnpickler.loads
 
 
 def serialize_metadata(metadata):
-    return json.dumps(metadata, separators=(',', ':'))
+    return quote(json.dumps(metadata, separators=(',', ':')))
 
 
-def deserialize_metadata(metastr):
+def deserialize_metadata(in_metastr):
     """
     Returns dict populated with metadata if deserializing is successful.
     Returns empty dict if deserialzing fails.
     """
     global read_pickled_metadata
+
+    metastr = unquote(in_metastr)
 
     if metastr.startswith('\x80\x02}') and metastr.endswith('.') and \
             read_pickled_metadata:
@@ -236,32 +239,34 @@ def _read_for_etag(fp):
     return etag.hexdigest()
 
 
-def get_etag(fd_or_path):
+def get_etag(path_or_fd):
     """
-    Either read the ETag from HPSS metadata, or read the entire file to
-    generate it.
-    """
-    # Try to just get the MD5 sum from HPSS. We're assuming that we recheck
-    # this checksum every time we actually open the file for read/write.
-    attrs = xattr.xattr(fd_or_path)
-    if 'system.hpss.hash' in attrs:
-        return attrs['system.hpss.hash']
-    elif 'user.hash.checksum' in attrs:
-        return attrs['user.hash.checksum']
+    FIXME: It would be great to have a translator that returns the md5sum() of
+    the file as an xattr that can be simply fetched.
 
-    if isinstance(fd_or_path, int):
+    Since we don't have that we should yield after each chunk read and
+    computed so that we don't consume the worker thread.
+    """
+    etag = ''
+    if isinstance(path_or_fd, int):
         # We are given a file descriptor, so this is an invocation from the
         # DiskFile.open() method.
-        etag = _read_for_etag(do_dup(fd_or_path))
-        do_lseek(fd_or_path, 0, os.SEEK_SET)
-
+        fd = path_or_fd
+        dup_fd = do_dup(fd)
+        try:
+            etag = _read_for_etag(dup_fd)
+            do_lseek(fd, 0, os.SEEK_SET)
+        finally:
+            do_close(dup_fd)
     else:
         # We are given a path to the object when the DiskDir.list_objects_iter
         # method invokes us.
-        path = fd_or_path
+        path = path_or_fd
         fd = do_open(path, os.O_RDONLY)
-        etag = _read_for_etag(fd)
-        do_close(fd)
+        try:
+            etag = _read_for_etag(fd)
+        finally:
+            do_close(fd)
 
     return etag
 
@@ -270,7 +275,6 @@ def get_object_metadata(obj_path_or_fd, stats=None):
     """
     Return metadata of object.
     """
-    logging.error('Entering get_object_metadata for %s' % obj_path_or_fd)
     if not stats:
         if isinstance(obj_path_or_fd, int):
             # We are given a file descriptor, so this is an invocation from the

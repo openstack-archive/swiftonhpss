@@ -28,6 +28,7 @@ import test.functional as tf
 # PGB - changed 'AUTH_' hardcoded reseller prefix to 'KEY_'.
 # TODO: read Swift proxy config for this
 
+
 class TestSwiftOnFileEnv:
     @classmethod
     def setUp(cls):
@@ -92,8 +93,8 @@ class TestSwiftOnFile(Base):
     set_up = False
 
     @classmethod
-    def tearDownClass(self):
-        self.env.account.delete_containers()
+    def tearDownClass(cls):
+        cls.env.account.delete_containers()
         #for account_dir in os.listdir(self.env.root_dir):
         #    rmtree(os.path.join(self.env.root_dir, account_dir))
 
@@ -132,15 +133,14 @@ class TestSwiftOnFile(Base):
         file_item.write_random()
         self.assert_status(201)
         file_info = file_item.info()
-        fhOnMountPoint = open(os.path.join(
-                              self.env.root_dir,
-                              self.env.account.name,
-                              self.env.container.name,
-                              file_name), 'r')
-        data_read_from_mountP = fhOnMountPoint.read()
+
+        with open(os.path.join(self.env.root_dir,
+                               self.env.account.name,
+                               self.env.container.name,
+                               file_name), 'r') as fhOnMountPoint:
+            data_read_from_mountP = fhOnMountPoint.read()
         md5_returned = hashlib.md5(data_read_from_mountP).hexdigest()
         self.assertEquals(md5_returned, file_info['etag'])
-        fhOnMountPoint.close()
 
     def test_GET_on_file_created_over_mountpoint(self):
         file_name = Utils.create_name()

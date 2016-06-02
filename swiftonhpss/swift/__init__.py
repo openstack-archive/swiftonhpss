@@ -13,7 +13,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-""" SwiftOnHPSS """
+""" SwiftOnHPSS package information, stashed here """
 
 
 class PkgInfo(object):
@@ -22,7 +22,7 @@ class PkgInfo(object):
         self.release = release
         self.name = name
         self.final = final
-        self.full_version = self.canonical_version + '-' + self.release
+        self.full_version = self.canonical_version + '.' + self.release
 
     def save_config(self, filename):
         """
@@ -44,7 +44,7 @@ class PkgInfo(object):
 
 # Change the Package version here
 _pkginfo = PkgInfo(canonical_version='2.5.0',
-                   release='0',
+                   release='1',
                    name='swiftonhpss',
                    final=False)
 __version__ = _pkginfo.pretty_version
