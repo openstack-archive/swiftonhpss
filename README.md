@@ -1,4 +1,3 @@
-[![Build Status](https://travis-ci.org/swiftonfile/swiftonfile.svg?branch=master)](https://travis-ci.org/swiftonfile/swiftonfile)
 
 # Swift-on-HPSS
 Swift-on-HPSS is a fork of the Swift-on-File Swift Object Server implementation
@@ -55,8 +54,8 @@ Multi-site replication for these objects must be provided by your HPSS
 configuration.
  
 ## Get involved:
-
 (TODO: write specifics for Swift-on-HPSS)
+
 To learn more about Swift-On-File, you can watch the presentation given at
 the Paris OpenStack Summit: [Deploying Swift on a File System](http://youtu.be/vPn2uZF4yWo).
 The Paris presentation slides can be found [here](https://github.com/thiagol11/openstack-fall-summit-2014)
@@ -70,5 +69,6 @@ or find us in the #swiftonfile channel on Freenode.
 
 # Guides to get started:
 (TODO: modify these guides with Swift-on-HPSS specifics)
+
 1. [Quick Start Guide with XFS/GlusterFS](doc/markdown/quick_start_guide.md)
 2. [Developer Guide](doc/markdown/dev_guide.md)
