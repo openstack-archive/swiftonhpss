@@ -26,8 +26,8 @@ setup(
     description='SwiftOnHPSS',
     license='Apache License (2.0)',
     author='HPSS Collaboration',
-    url='https://github.com/hpss-collaboration/swiftonhpss',
-    packages=find_packages(exclude=['test', 'bin']),
+    url='https://github.com/openstack/swiftonhpss',
+    packages=find_packages(exclude=['test', 'bin', 'system_test']),
     test_suite='nose.collector',
     classifiers=[
         'Development Status :: 3 - Alpha',
