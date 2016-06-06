@@ -23,7 +23,11 @@ import shutil
 setup(
     name=_pkginfo.name,
     version=_pkginfo.full_version,
-    description='SwiftOnHPSS',
+    description="Swift-on-HPSS is a fork of the Swift-on-File Swift"
+                " Object Server implementation that enables users to"
+                " access the same data, both as an object and as a file."
+                " Data can be stored and retrieved through Swift's REST"
+                " interface or as files from your site's HPSS archive system.",
     license='Apache License (2.0)',
     author='HPSS Collaboration',
     url='https://github.com/openstack/swiftonhpss',
