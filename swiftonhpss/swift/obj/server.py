@@ -29,7 +29,7 @@ from swift.common.swob import HTTPConflict, HTTPBadRequest, HeaderKeyDict, \
     HTTPInsufficientStorage, HTTPPreconditionFailed, HTTPRequestTimeout, \
     HTTPClientDisconnect, HTTPUnprocessableEntity, HTTPNotImplemented, \
     HTTPServiceUnavailable, HTTPCreated, HTTPNotFound, HTTPAccepted, \
-    HTTPNoContent, Request, Response
+    HTTPNoContent, Response
 from swift.common.utils import public, timing_stats, replication, \
     config_true_value, Timestamp, csv_append
 from swift.common.request_helpers import get_name_and_placement, \
@@ -40,7 +40,7 @@ from swiftonhpss.swift.common.exceptions import AlreadyExistsAsFile, \
 from swift.common.exceptions import DiskFileDeviceUnavailable, \
     DiskFileNotExist, DiskFileQuarantined, ChunkReadTimeout, DiskFileNoSpace, \
     DiskFileXattrNotSupported, DiskFileExpired, DiskFileDeleted
-from swift.common.constraints import valid_timestamp, check_account_format
+from swift.common.constraints import valid_timestamp
 from swift.obj import server
 from swift.common.ring import Ring
 
@@ -64,8 +64,9 @@ class SwiftOnFileDiskFileRouter(object):
 
 class ObjectController(server.ObjectController):
     """
-    Subclass of the object server's ObjectController that supports HPSS-specific
-    metadata headers and operations (such as COS assignment and purge locking).
+    Subclass of the object server's ObjectController that supports
+    HPSS-specific metadata headers and operations (such as COS assignment
+    and purge locking).
     """
 
     def setup(self, conf):
@@ -90,7 +91,6 @@ class ObjectController(server.ObjectController):
         if not self.container_ring:
             self.container_ring = Ring(self.swift_dir, ring_name='container')
         return self.container_ring
-
 
     @public
     @timing_stats()
@@ -195,10 +195,14 @@ class ObjectController(server.ObjectController):
                         return HTTPUnprocessableEntity(request=request)
 
                     # Update object metadata
-                    metadata = {'X-Timestamp': request.timestamp.internal,
-                                'Content-Type': request.headers['content-type'],
-                                'ETag': etag,
-                                'Content-Length': str(upload_size),
+                    metadata = {'X-Timestamp':
+                                   request.timestamp.internal,
+                                'Content-Type':
+                                   request.headers['content-type'],
+                                'ETag':
+                                   etag,
+                                'Content-Length':
+                                   str(upload_size),
                                 }
                     meta_headers = {header: request.headers[header] for header
                                     in request.headers
@@ -206,7 +210,8 @@ class ObjectController(server.ObjectController):
                     metadata.update(meta_headers)
                     backend_headers = \
                         request.headers.get('X-Backend-Replication-Headers')
-                    for header_key in (backend_headers or self.allowed_headers):
+                    for header_key in (backend_headers or 
+                                       self.allowed_headers):
                         if header_key in request.headers:
                             header_caps = header_key.title()
                             metadata[header_caps] = request.headers[header_key]
@@ -262,13 +267,13 @@ class ObjectController(server.ObjectController):
             self.container_update('PUT', account, container, obj, request,
                                   HeaderKeyDict(
                                       {'x-size':
-                                           metadata['Content-Length'],
+                                          metadata['Content-Length'],
                                        'x-content-type':
-                                           metadata['Content-Type'],
+                                          metadata['Content-Type'],
                                        'x-timestamp':
-                                           metadata['X-Timestamp'],
+                                          metadata['X-Timestamp'],
                                        'x-etag':
-                                           metadata['ETag']}),
+                                          metadata['ETag']}),
                                   device, policy)
             # Create convenience symlink
             try:
@@ -346,8 +351,8 @@ class ObjectController(server.ObjectController):
 
         # Get DiskFile
         try:
-            disk_file = self.get_diskfile(device, partition, account, container,
-                                          obj, policy=policy)
+            disk_file = self.get_diskfile(device, partition, account,
+                                          container, obj, policy=policy)
 
         except DiskFileDeviceUnavailable:
             return HTTPInsufficientStorage(drive=device, request=request)
@@ -417,8 +422,8 @@ class ObjectController(server.ObjectController):
 
         # Get Diskfile
         try:
-            disk_file = self.get_diskfile(device, partition, account, container,
-                                          obj, policy)
+            disk_file = self.get_diskfile(device, partition, account,
+                                          container, obj, policy)
         except DiskFileDeviceUnavailable:
             return HTTPInsufficientStorage(drive=device, request=request)
 
@@ -445,8 +450,8 @@ class ObjectController(server.ObjectController):
                     'Content-Type', 'application/octet-stream'
                 )
                 for key, value in metadata.iteritems():
-                    if is_sys_or_user_meta('object', key) or \
-                                    key.lower() in self.allowed_headers:
+                    if is_sys_or_user_meta('object', key) \
+                        or key.lower() in self.allowed_headers:
                         response.headers[key] = value
                 response.etag = metadata['ETag']
                 response.last_modified = math.ceil(float(file_x_ts))
@@ -526,7 +531,7 @@ class ObjectController(server.ObjectController):
         if orig_timestamp >= req_timestamp:
             return HTTPConflict(request=request,
                                 headers={
-                                    'X-Backend-Timestamp': orig_timestamp.internal
+                                   'X-Backend-Timestamp': orig_timestamp.internal
                                 })
         metadata = {'X-Timestamp': req_timestamp.internal}
         metadata.update(val for val in request.headers.iteritems()

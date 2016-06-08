@@ -313,11 +313,12 @@ class DiskFileWriter(object):
         # (HPSS) Purge lock the file now if we're asked to.
         if purgelock:
             try:
-                hpssfs.ioctl(self._fd, hpssfs.HPSSFS_PURGE_LOCK, int(purgelock))
+                hpssfs.ioctl(self._fd, hpssfs.HPSSFS_PURGE_LOCK,
+                             int(purgelock))
             except IOError as err:
                 raise SwiftOnFileSystemIOError(err.errno,
-                                               '%s, hpssfs.ioctl("%s", ...)' % (
-                                               err.strerror, self._fd))
+                                               '%s, hpssfs.ioctl("%s", ...)' \
+                                               % (err.strerror, self._fd))
 
         # From the Department of the Redundancy Department, make sure
         # we call drop_cache() after fsync() to avoid redundant work
@@ -811,7 +812,7 @@ class DiskFile(object):
             raise SwiftOnFileSystemIOError(
                 err.errno,
                 '%s, xattr.getxattr("system.hpss.level", ...)' % err.strerror
-                )
+            )
         try:
             file_levels = raw_file_levels.split(";")
             top_level = file_levels[0].split(':')
@@ -1051,17 +1052,17 @@ class DiskFile(object):
                         hpssfs.ioctl(fd, hpssfs.HPSSFS_SET_FSIZE_HINT,
                                      long(size))
                     except IOError as err:
-                        raise SwiftOnFileSystemIOError(err.errno,
-                                                       '%s, hpssfs.ioctl("%s", SET_FSIZE)' % (
-                                                       err.strerror, fd))
+                        msg = '%s, hpssfs.ioctl("%s", SET_FSIZE)'
+                        msg = msg % (err.strerror, fd)
+                        raise SwiftOnFileSystemIOError(err.errno, msg)
 
                 if cos:
                     try:
                         hpssfs.ioctl(fd, hpssfs.HPSSFS_SET_COS_HINT, int(cos))
                     except IOError as err:
-                        raise SwiftOnFileSystemIOError(err.errno,
-                                                       '%s, hpssfs.ioctl("%s", SET_COS)' % (
-                                                       err.strerror, fd))
+                        msg = '%s, hpssfs.ioctl("%s", SET_COS)'
+                        msg = msg % (err.strerror, fd)
+                        raise SwiftOnFileSystemIOError(err.errno, msg)
 
             except SwiftOnFileSystemOSError as gerr:
                 if gerr.errno in (errno.ENOSPC, errno.EDQUOT):
