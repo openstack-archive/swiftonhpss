@@ -18,7 +18,6 @@
 import sys
 import stat
 import os
-import multiprocessing
 from pwd import getpwuid
 import logging
 import argparse
@@ -87,11 +86,11 @@ def main(program_args):
     del password
 
     # Figure out what we're doing.
-    target_account, target_container = program_args.account,\
-                                       program_args.container
+    target_account = program_args.account
+    target_container = program_args.container
 
     # Start doing it.
-    #pool = multiprocessing.Pool(processes=multiprocessing.cpu_count()-1)
+    # pool = multiprocessing.Pool(processes=multiprocessing.cpu_count()-1)
 
     # Multiprocessing does not play nicely with the lazy loading that
     # keystoneclient does, so let's not mess with it for now.
@@ -227,7 +226,7 @@ def check_usage():
     return parser.parse_args()
 
 
-class Reconciler:
+class Reconciler(object):
 
     def __init__(self, args):
         self._args = args
@@ -436,7 +435,8 @@ class Reconciler:
                 logging.exception("Putting container %s went wrong" %
                                   target_container)
                 raise e
-        print "Reconciling container %s/%s" % (target_account, target_container)
+        print "Reconciling container %s/%s" % \
+            (target_account, target_container)
         # Make sure those objects get added into the Swift metadata DBs
         self.add_objects_from_hpss(swift_api, target_container, container_dir)
 
@@ -458,7 +458,8 @@ class Reconciler:
         return objects
 
     @trace_function
-    def add_objects_from_hpss(self, swift_api, target_container, container_dir):
+    def add_objects_from_hpss(self, swift_api, target_container,
+                              container_dir):
         """
         Update object metadata on object creates, and returns a list of all the
         objects existing in the container from Swift.
@@ -512,7 +513,8 @@ class Reconciler:
         try:
             hpss_containers = os.listdir(account_directory)
         except OSError as err:
-            print "Unable to list files under directory: %s" % account_directory
+            print "Unable to list files under directory: %s" % \
+                account_directory
             raise err
 
         # Delete containers that only exist in Swift, but not HPSS
@@ -552,8 +554,8 @@ class Reconciler:
         known_good_objects = []
         swift_only_objects = list(set(swift_objects) - set(hpss_objects))
 
-        # If we have objects that only exist in the Swift metadata, delete those
-        # objects.
+        # If we have objects that only exist in the Swift metadata,
+        # delete those objects.
         for target_obj in swift_only_objects:
             try:
                 swift_api.delete_object(target_container, target_obj)
@@ -614,7 +616,8 @@ class Reconciler:
         if file_user not in keystone_users:
             fail_reason = \
                 "Cannot configure proper permissions for this path %s\
-                 because user %s does not exist in keystone" % (path, file_user)
+                 because user %s does not exist in keystone" % \
+                (path, file_user)
             print fail_reason
             logging.error(fail_reason)
             raise IOError(fail_reason)
@@ -639,7 +642,7 @@ class Reconciler:
 # This only exists because the keystoneclient library is so massive that it has
 # to have a lazy-loading mechanism that ensures only one of it can be active,
 # so we can't have handles to multiple different Keystone scopes simultaneously
-class LightweightKeystoneAPI:
+class LightweightKeystoneAPI(object):
 
     MEMBER_ROLE_ID = '9fe2ff9ee4384b1894a90878d3e92bab'
 
@@ -677,33 +680,19 @@ class LightweightKeystoneAPI:
 
         if self.version == 'v2':
             url = '%s/tokens' % self.url
+            creds = {'username': self.username, 'password': self.password}
             token_req = {'auth': {'tenantName': self.tenant_name,
-                         'passwordCredentials': {
-                         'username': self.username,
-                         'password': self.password
-                         }}}
+                                  'passwordCredentials': creds}}
         else:
             url = '%s/auth/tokens' % self.url
-            token_req = {'auth': {'identity':
-                                      {'methods': ['password'],
-                                       'password': {
-                                           'user': {
-                                               'name': self.username,
-                                               'password': self.password,
-                                               'domain': {'id': 'default'}
-                                           }
-                                       }
-                                       },
-                                  'scope': {
-                                      'project': {
-                                          'name': self.tenant_name,
-                                          'domain': {
-                                              'id': 'default'
-                                          }
-                                      }
-                                  }
-                              }
-                         }
+            domain = {'id': 'default'}
+            creds = {'user': {'name': self.username,
+                              'password': self.password,
+                              'domain': domain}}
+            scope = {'project': {'name': self.tenant_name, 'domain': domain}}
+            token_req = {'auth': {'identity': {'methods': ['password'],
+                                               'password': creds},
+                                  'scope': scope}}
         try:
             resp_headers, resp_json =\
                 self._get_keystone_response(requests.post,

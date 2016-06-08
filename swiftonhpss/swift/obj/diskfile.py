@@ -23,7 +23,10 @@ except ImportError:
     import random
 import logging
 import time
-import hpssfs
+try:
+    import hpssfs
+except ImportError:
+    import swiftonhpss.swift.common.hpssfs_ioctl as hpssfs
 import xattr
 from uuid import uuid4
 from hashlib import md5
@@ -55,7 +58,7 @@ from swift.obj.diskfile import get_async_dir
 
 # FIXME: Hopefully we'll be able to move to Python 2.7+ where O_CLOEXEC will
 # be back ported. See http://www.python.org/dev/peps/pep-0433/
-O_CLOEXEC = 0o20000000
+O_CLOEXEC = 0o02000000
 
 MAX_RENAME_ATTEMPTS = 10
 MAX_OPEN_ATTEMPTS = 10
@@ -313,11 +316,12 @@ class DiskFileWriter(object):
         # (HPSS) Purge lock the file now if we're asked to.
         if purgelock:
             try:
-                hpssfs.ioctl(self._fd, hpssfs.HPSSFS_PURGE_LOCK, int(purgelock))
+                hpssfs.ioctl(self._fd, hpssfs.HPSSFS_PURGE_LOCK,
+                             int(purgelock))
             except IOError as err:
-                raise SwiftOnFileSystemIOError(err.errno,
-                                               '%s, hpssfs.ioctl("%s", ...)' % (
-                                               err.strerror, self._fd))
+                raise SwiftOnFileSystemIOError(
+                    err.errno,
+                    '%s, hpssfs.ioctl("%s", ...)' % (err.strerror, self._fd))
 
         # From the Department of the Redundancy Department, make sure
         # we call drop_cache() after fsync() to avoid redundant work
@@ -811,7 +815,7 @@ class DiskFile(object):
             raise SwiftOnFileSystemIOError(
                 err.errno,
                 '%s, xattr.getxattr("system.hpss.level", ...)' % err.strerror
-                )
+            )
         try:
             file_levels = raw_file_levels.split(";")
             top_level = file_levels[0].split(':')
@@ -1051,17 +1055,19 @@ class DiskFile(object):
                         hpssfs.ioctl(fd, hpssfs.HPSSFS_SET_FSIZE_HINT,
                                      long(size))
                     except IOError as err:
-                        raise SwiftOnFileSystemIOError(err.errno,
-                                                       '%s, hpssfs.ioctl("%s", SET_FSIZE)' % (
-                                                       err.strerror, fd))
+                        message = '%s, hpssfs.ioctl("%s", SET_FSIZE)'
+                        raise SwiftOnFileSystemIOError(
+                            err.errno,
+                            message % (err.strerror, fd))
 
                 if cos:
                     try:
                         hpssfs.ioctl(fd, hpssfs.HPSSFS_SET_COS_HINT, int(cos))
                     except IOError as err:
-                        raise SwiftOnFileSystemIOError(err.errno,
-                                                       '%s, hpssfs.ioctl("%s", SET_COS)' % (
-                                                       err.strerror, fd))
+                        message = '%s, hpssfs.ioctl("%s", SET_COS)'
+                        raise SwiftOnFileSystemIOError(
+                            err.errno,
+                            message % (err.strerror, fd))
 
             except SwiftOnFileSystemOSError as gerr:
                 if gerr.errno in (errno.ENOSPC, errno.EDQUOT):
