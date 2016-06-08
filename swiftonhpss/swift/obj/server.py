@@ -22,8 +22,6 @@ import os
 import hpssfs
 import time
 
-import eventlet
-
 from hashlib import md5
 from swift.common.swob import HTTPConflict, HTTPBadRequest, HeaderKeyDict, \
     HTTPInsufficientStorage, HTTPPreconditionFailed, HTTPRequestTimeout, \
@@ -391,14 +389,12 @@ class ObjectController(server.ObjectController):
                 hpss_headers = disk_file.read_hpss_system_metadata()
                 response.headers.update(hpss_headers)
             except SwiftOnFileSystemIOError:
-                disk_file._close_fd()
                 return HTTPServiceUnavailable(request=request)
 
         if 'X-Object-Sysmeta-Update-Container' in response.headers:
             self._sof_container_update(request, response)
             response.headers.pop('X-Object-Sysmeta-Update-Container')
 
-        disk_file._close_fd()
         return response
 
     @public
@@ -411,9 +407,6 @@ class ObjectController(server.ObjectController):
             'X-Auth-Token' not in request.headers and
             'X-Storage-Token' not in request.headers
         )
-
-        if 'X-Debug-Stop' in request.headers:
-            raise eventlet.StopServe()
 
         # Get Diskfile
         try:
@@ -468,7 +461,6 @@ class ObjectController(server.ObjectController):
                         return HTTPServiceUnavailable(request=request)
                 return request.get_response(response)
         except (DiskFileNotExist, DiskFileQuarantined) as e:
-            disk_file._close_fd()
             headers = {}
             if hasattr(e, 'timestamp'):
                 headers['X-Backend-Timestamp'] = e.timestamp.internal
