@@ -1,0 +1,9 @@
+Code-Review+2: Prashanth Pai <ppai@redhat.com>
+Code-Review+2: Thiago da Silva <thiago@redhat.com>
+Workflow+1: Thiago da Silva <thiago@redhat.com>
+Verified+2: Jenkins
+Submitted-by: Jenkins
+Submitted-at: Tue, 30 Sep 2014 16:09:15 +0000
+Reviewed-on: https://review.openstack.org/124539
+Project: openstack/swiftonhpss
+Branch: refs/heads/master
