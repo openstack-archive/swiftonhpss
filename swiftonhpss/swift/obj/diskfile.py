@@ -55,7 +55,7 @@ from swift.obj.diskfile import get_async_dir
 
 # FIXME: Hopefully we'll be able to move to Python 2.7+ where O_CLOEXEC will
 # be back ported. See http://www.python.org/dev/peps/pep-0433/
-O_CLOEXEC = 0o20000000
+O_CLOEXEC = 0o02000000
 
 MAX_RENAME_ATTEMPTS = 10
 MAX_OPEN_ATTEMPTS = 10

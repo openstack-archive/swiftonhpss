@@ -24,7 +24,6 @@ from eventlet import sleep
 import cPickle as pickle
 from cStringIO import StringIO
 import pickletools
-import xattr
 from swiftonhpss.swift.common.exceptions import SwiftOnFileSystemIOError
 from swift.common.exceptions import DiskFileNoSpace
 from swift.common.db import utf8encodekeys
