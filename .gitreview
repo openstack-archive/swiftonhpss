@@ -1,8 +1,4 @@
-# TODO: get ourselves a nice and shiny CI system like this
-
-#[gerrit]
-#host=review.openstack.org
-#port=29418
-#project=openstack/swiftonfile.git
-#defaultbranch=master
-#defaultremote=gerrit
+[gerrit]
+host=review.openstack.org
+port=29418
+project=openstack/swiftonhpss.git
