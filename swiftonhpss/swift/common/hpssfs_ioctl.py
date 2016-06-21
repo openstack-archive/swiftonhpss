@@ -34,7 +34,8 @@ HPSSFS_UNDELETE_OVERWRITE_AND_RESTORE = 0x00000003
 
 def ioctl(fd, cmd, val=None):
     if val is not None:
-        valbuf = array.array("i", val)
-        fcntl.ioctl(fd, cmd, valbuf)
+        valbuf = array.array('i', [0])
     else:
-        fcntl.ioctl(fd, cmd)
+        valbuf = array.array('i', [val])
+    fcntl.ioctl(fd, cmd, valbuf)
+    return valbuf[0]
