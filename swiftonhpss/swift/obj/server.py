@@ -351,10 +351,19 @@ class ObjectController(server.ObjectController):
         except DiskFileDeviceUnavailable:
             return HTTPInsufficientStorage(drive=device, request=request)
 
+        hpss_headers = None
+
         # Read DiskFile metadata
         try:
-            disk_file.open()
-            metadata = disk_file.get_metadata()
+            with disk_file.open():
+                metadata = disk_file.get_metadata()
+                want_hpss_metadata = request.headers.get('X-HPSS-Get-Metadata',
+                                                         False)
+                if config_true_value(want_hpss_metadata):
+                    try:
+                        hpss_headers = disk_file.read_hpss_system_metadata()
+                    except SwiftOnFileSystemIOError:
+                        return HTTPServiceUnavailable(request=request)
         except (DiskFileNotExist, DiskFileQuarantined) as e:
             headers = {}
             if hasattr(e, 'timestamp'):
@@ -382,15 +391,8 @@ class ObjectController(server.ObjectController):
         except KeyError:
             pass
 
-        # (HPSS) Inject HPSS xattr metadata into headers
-        want_hpss_metadata = request.headers.get('X-HPSS-Get-Metadata',
-                                                 False)
-        if config_true_value(want_hpss_metadata):
-            try:
-                hpss_headers = disk_file.read_hpss_system_metadata()
-                response.headers.update(hpss_headers)
-            except SwiftOnFileSystemIOError:
-                return HTTPServiceUnavailable(request=request)
+        if hpss_headers:
+            response.headers.update(hpss_headers)
 
         if 'X-Object-Sysmeta-Update-Container' in response.headers:
             self._sof_container_update(request, response)
