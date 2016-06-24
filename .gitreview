@@ -2,5 +2,5 @@
 host=review.openstack.org
 port=29418
 project=openstack/swiftonhpss.git
-defaultbranch=master
+defaultbranch=stable/liberty
 defaultremote=gerrit
