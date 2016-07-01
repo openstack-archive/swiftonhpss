@@ -88,6 +88,7 @@ class ObjectController(server.ObjectController):
             config_true_value(conf.get('read_pickled_metadata', 'no'))
         self.allow_purgelock = \
             config_true_value(conf.get('allow_purgelock', True))
+        self.default_cos_id = conf.get('default_cos_id')
 
     def get_container_ring(self):
         """Get the container ring.  Load it, if it hasn't been yet."""
@@ -161,7 +162,8 @@ class ObjectController(server.ObjectController):
             elapsed_time = 0
 
             # (HPSS) Check for HPSS-specific metadata headers
-            cos = request.headers.get('X-Hpss-Class-Of-Service-Id', None)
+            cos = request.headers.get('X-Hpss-Class-Of-Service-Id',
+                                      self.default_cos_id)
 
             if self.allow_purgelock:
                 purgelock = config_true_value(
