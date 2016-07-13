@@ -86,6 +86,8 @@ class ObjectController(server.ObjectController):
         # future releases
         utils.read_pickled_metadata = \
             config_true_value(conf.get('read_pickled_metadata', 'no'))
+        self.allow_purgelock = \
+            config_true_value(conf.get('allow_purgelock', True))
 
     def get_container_ring(self):
         """Get the container ring.  Load it, if it hasn't been yet."""
@@ -160,8 +162,12 @@ class ObjectController(server.ObjectController):
 
             # (HPSS) Check for HPSS-specific metadata headers
             cos = request.headers.get('X-Hpss-Class-Of-Service-Id', None)
-            purgelock = config_true_value(
-                request.headers.get('X-Hpss-Purgelock-Status', 'false'))
+
+            if self.allow_purgelock:
+                purgelock = config_true_value(
+                    request.headers.get('X-Hpss-Purgelock-Status', 'false'))
+            else:
+                purgelock = False
 
             try:
                 # Feed DiskFile our HPSS-specific stuff
@@ -490,7 +496,11 @@ class ObjectController(server.ObjectController):
             return HTTPInsufficientStorage(drive=device, request=request)
 
         # Set Purgelock status if we got it
-        purgelock = request.headers.get('X-HPSS-Purgelock-Status')
+        if self.allow_purgelock:
+            purgelock = request.headers.get('X-HPSS-Purgelock-Status')
+        else:
+            purgelock = False
+
         if purgelock:
             try:
                 hpssfs.ioctl(disk_file._fd, hpssfs.HPSSFS_PURGE_LOCK,
