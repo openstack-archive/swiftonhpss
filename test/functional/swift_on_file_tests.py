@@ -140,7 +140,7 @@ class TestSwiftOnFile(Base):
                                file_name), 'r') as fhOnMountPoint:
             data_read_from_mountP = fhOnMountPoint.read()
         md5_returned = hashlib.md5(data_read_from_mountP).hexdigest()
-        self.assertEquals(md5_returned, file_info['etag'])
+        self.assertEqual(md5_returned, file_info['etag'])
 
     def test_GET_on_file_created_over_mountpoint(self):
         file_name = Utils.create_name()
