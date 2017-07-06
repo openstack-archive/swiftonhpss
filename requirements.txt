@@ -11,6 +11,7 @@ simplejson>=2.0.9
 six>=1.9.0
 xattr>=0.4
 PyECLib==1.0.7
+oslo.utils>=3.20.0
 
 # HPSS-specific package requirements. Get these from your HPSS support
 # representative.

@@ -17,7 +17,7 @@
 
 import unittest
 import json
-from uuid import uuid4
+from oslo_utils import uuidutils
 from nose import SkipTest
 from string import letters
 
@@ -302,7 +302,7 @@ class TestAccount(unittest.TestCase):
                          acl_json_str)
 
         # admin can write account metadata
-        value = str(uuid4())
+        value = uuidutils.generate_uuid()
         headers = {'x-account-meta-test': value}
         resp = retry(post, headers=headers, use_account=3)
         resp.read()
@@ -338,7 +338,7 @@ class TestAccount(unittest.TestCase):
             return check_response(conn)
 
         # add an account metadata, and temp-url-key to account
-        value = str(uuid4())
+        value = uuidutils.generate_uuid()
         headers = {
             'x-account-meta-temp-url-key': 'secret',
             'x-account-meta-test': value,
@@ -406,7 +406,7 @@ class TestAccount(unittest.TestCase):
                          'secret')
 
         # admin tester3 can even change temp-url-key
-        secret = str(uuid4())
+        secret = uuidutils.generate_uuid()
         headers = {
             'x-account-meta-temp-url-key': secret,
         }
