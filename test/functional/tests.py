@@ -25,10 +25,10 @@ import six
 import time
 import unittest
 import urllib
-import uuid
 from copy import deepcopy
 import eventlet
 from nose import SkipTest
+from oslo_utils import uuidutils
 from swift.common.http import is_success, is_client_error
 
 from test.functional import normalized_urls, load_constraint, cluster_info
@@ -41,7 +41,7 @@ from test.functional.swift_test_client import Account, Connection, File, \
 class Utils(object):
     @classmethod
     def create_ascii_name(cls, length=None):
-        return uuid.uuid4().hex
+        return uuidutils.generate_uuid(dashed=False)
 
     @classmethod
     def create_utf8_name(cls, length=None):
