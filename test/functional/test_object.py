@@ -18,7 +18,7 @@
 import json
 import unittest
 from nose import SkipTest
-from uuid import uuid4
+from oslo_utils import uuidutils
 
 from six.moves import range
 
@@ -32,13 +32,13 @@ class TestObject(unittest.TestCase):
     def setUp(self):
         if tf.skip:
             raise SkipTest
-        self.container = uuid4().hex
+        self.container = uuidutils.generate_uuid(dashed=False)
 
         self.containers = []
         self._create_container(self.container)
         self._create_container(self.container, use_account=2)
 
-        self.obj = uuid4().hex
+        self.obj = uuidutils.generate_uuid(dashed=False)
 
         def put(url, token, parsed, conn):
             conn.request('PUT', '%s/%s/%s' % (
@@ -51,7 +51,7 @@ class TestObject(unittest.TestCase):
 
     def _create_container(self, name=None, headers=None, use_account=1):
         if not name:
-            name = uuid4().hex
+            name = uuidutils.generate_uuid(dashed=False)
         self.containers.append(name)
         headers = headers or {}
 
@@ -429,7 +429,7 @@ class TestObject(unittest.TestCase):
         self.assertEqual(resp.status, 403)
 
         # create a shared container writable by account3
-        shared_container = uuid4().hex
+        shared_container = uuidutils.generate_uuid(dashed=False)
 
         def put(url, token, parsed, conn):
             conn.request('PUT', '%s/%s' % (
@@ -571,7 +571,7 @@ class TestObject(unittest.TestCase):
         self.assertEqual(body, 'test')
 
         # can not put an object
-        obj_name = str(uuid4())
+        obj_name = uuidutils.generate_uuid()
         resp = retry(put, obj_name, use_account=3)
         body = resp.read()
         self.assertEqual(resp.status, 403)
@@ -652,7 +652,7 @@ class TestObject(unittest.TestCase):
         self.assertEqual(body, 'test')
 
         # can put an object
-        obj_name = str(uuid4())
+        obj_name = uuidutils.generate_uuid()
         resp = retry(put, obj_name, use_account=3)
         body = resp.read()
         self.assertEqual(resp.status, 201)
@@ -733,7 +733,7 @@ class TestObject(unittest.TestCase):
         self.assertEqual(body, 'test')
 
         # can put an object
-        obj_name = str(uuid4())
+        obj_name = uuidutils.generate_uuid()
         resp = retry(put, obj_name, use_account=3)
         body = resp.read()
         self.assertEqual(resp.status, 201)
@@ -893,7 +893,7 @@ class TestObject(unittest.TestCase):
             self.assertEqual(resp.status, 200)
 
         # Create another container for the third set of segments
-        acontainer = uuid4().hex
+        acontainer = uuidutils.generate_uuid(dashed=False)
 
         def put(url, token, parsed, conn):
             conn.request('PUT', parsed.path + '/' + acontainer, '',
@@ -1192,13 +1192,13 @@ class TestObject(unittest.TestCase):
         policy = self.policies.select()
         container = self._create_container(
             headers={'X-Storage-Policy': policy['name']})
-        obj = uuid4().hex
+        obj = uuidutils.generate_uuid(dashed=False)
 
         # create a container in second policy
         other_policy = self.policies.exclude(name=policy['name']).select()
         other_container = self._create_container(
             headers={'X-Storage-Policy': other_policy['name']})
-        other_obj = uuid4().hex
+        other_obj = uuidutils.generate_uuid(dashed=False)
 
         def put_obj(url, token, parsed, conn, container, obj):
             # to keep track of things, use the original path as the body
