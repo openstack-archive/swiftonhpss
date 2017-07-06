@@ -28,10 +28,10 @@ try:
 except ImportError:
     import swiftonhpss.swift.common.hpssfs_ioctl as hpssfs
 import xattr
-from uuid import uuid4
 from hashlib import md5
 from eventlet import sleep
 from contextlib import contextmanager
+from oslo_utils import uuidutils
 from swiftonhpss.swift.common.exceptions import AlreadyExistsAsFile, \
     AlreadyExistsAsDir
 from swift.common.utils import ThreadPool, hash_path, \
@@ -1043,8 +1043,10 @@ class DiskFile(object):
         while True:
             # To know more about why following temp file naming convention is
             # used, please read this GlusterFS doc:
-            # https://github.com/gluster/glusterfs/blob/master/doc/features/dht.md#rename-optimizations  # noqa
-            tmpfile = '.' + self._obj + '.' + uuid4().hex
+            # https://github.com/gluster/glusterfs/blob/master/doc/features/dht.md
+            # rename-optimizations
+            # noqa
+            tmpfile = '.' + self._obj + '.' + uuidutils.generate_uuid(dashed=False)
             tmppath = os.path.join(self._put_datadir, tmpfile)
             try:
                 fd = do_open(tmppath,
