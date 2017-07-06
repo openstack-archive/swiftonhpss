@@ -18,7 +18,7 @@
 import json
 import unittest
 from nose import SkipTest
-from uuid import uuid4
+from oslo_utils import uuidutils
 
 from test.functional import check_response, retry, requires_acls, \
     load_constraint, requires_policies
@@ -32,9 +32,9 @@ class TestContainer(unittest.TestCase):
     def setUp(self):
         if tf.skip:
             raise SkipTest
-        self.name = uuid4().hex
+        self.name = uuidutils.generate_uuid(dashed=False)
         # this container isn't created by default, but will be cleaned up
-        self.container = uuid4().hex
+        self.container = uuidutils.generate_uuid(dashed=False)
 
         def put(url, token, parsed, conn):
             conn.request('PUT', parsed.path + '/' + self.name, '',
@@ -192,7 +192,7 @@ class TestContainer(unittest.TestCase):
                          {'X-Auth-Token': token})
             return check_response(conn)
 
-        name = uuid4().hex
+        name = uuidutils.generate_uuid(dashed=False)
         resp = retry(put, name, 'Value')
         resp.read()
         self.assertEqual(resp.status, 201)
@@ -208,7 +208,7 @@ class TestContainer(unittest.TestCase):
         resp.read()
         self.assertEqual(resp.status, 204)
 
-        name = uuid4().hex
+        name = uuidutils.generate_uuid(dashed=False)
         resp = retry(put, name, '')
         resp.read()
         self.assertEqual(resp.status, 201)
@@ -279,7 +279,7 @@ class TestContainer(unittest.TestCase):
                          {'X-Auth-Token': token})
             return check_response(conn)
 
-        name = uuid4().hex
+        name = uuidutils.generate_uuid(dashed=False)
         resp = retry(
             put, name,
             {'X-Container-Meta-' + ('k' * self.max_meta_name_length): 'v'})
@@ -288,7 +288,7 @@ class TestContainer(unittest.TestCase):
         resp = retry(delete, name)
         resp.read()
         self.assertEqual(resp.status, 204)
-        name = uuid4().hex
+        name = uuidutils.generate_uuid(dashed=False)
         resp = retry(
             put, name,
             {'X-Container-Meta-' + (
@@ -299,7 +299,7 @@ class TestContainer(unittest.TestCase):
         resp.read()
         self.assertEqual(resp.status, 404)
 
-        name = uuid4().hex
+        name = uuidutils.generate_uuid(dashed=False)
         resp = retry(
             put, name,
             {'X-Container-Meta-Too-Long': 'k' * self.max_meta_value_length})
@@ -308,7 +308,7 @@ class TestContainer(unittest.TestCase):
         resp = retry(delete, name)
         resp.read()
         self.assertEqual(resp.status, 204)
-        name = uuid4().hex
+        name = uuidutils.generate_uuid(dashed=False)
         resp = retry(
             put, name,
             {'X-Container-Meta-Too-Long': 'k' * (
@@ -319,7 +319,7 @@ class TestContainer(unittest.TestCase):
         resp.read()
         self.assertEqual(resp.status, 404)
 
-        name = uuid4().hex
+        name = uuidutils.generate_uuid(dashed=False)
         headers = {}
         for x in range(self.max_meta_count):
             headers['X-Container-Meta-%d' % x] = 'v'
@@ -329,7 +329,7 @@ class TestContainer(unittest.TestCase):
         resp = retry(delete, name)
         resp.read()
         self.assertEqual(resp.status, 204)
-        name = uuid4().hex
+        name = uuidutils.generate_uuid(dashed=False)
         headers = {}
         for x in range(self.max_meta_count + 1):
             headers['X-Container-Meta-%d' % x] = 'v'
@@ -340,7 +340,7 @@ class TestContainer(unittest.TestCase):
         resp.read()
         self.assertEqual(resp.status, 404)
 
-        name = uuid4().hex
+        name = uuidutils.generate_uuid(dashed=False)
         headers = {}
         header_value = 'k' * self.max_meta_value_length
         size = 0
@@ -359,7 +359,7 @@ class TestContainer(unittest.TestCase):
         resp = retry(delete, name)
         resp.read()
         self.assertEqual(resp.status, 204)
-        name = uuid4().hex
+        name = uuidutils.generate_uuid(dashed=False)
         headers['X-Container-Meta-k'] = \
             'v' * (self.max_meta_overall_size - size)
         resp = retry(put, name, headers)
@@ -748,7 +748,7 @@ class TestContainer(unittest.TestCase):
         self.assertIn(self.name, listing)
 
         # read-only can not create containers
-        new_container_name = str(uuid4())
+        new_container_name = uuidutils.generate_uuid()
         resp = retry(put, new_container_name, use_account=3)
         resp.read()
         self.assertEqual(resp.status, 403)
@@ -783,7 +783,7 @@ class TestContainer(unittest.TestCase):
             return check_response(conn)
 
         # add some metadata
-        value = str(uuid4())
+        value = uuidutils.generate_uuid()
         headers = {'x-container-meta-test': value}
         resp = retry(post, self.name, headers=headers, use_account=1)
         resp.read()
@@ -807,7 +807,7 @@ class TestContainer(unittest.TestCase):
         self.assertEqual(resp.status, 204)
 
         # read-only can NOT write container metadata
-        new_value = str(uuid4())
+        new_value = uuidutils.generate_uuid()
         headers = {'x-container-meta-test': new_value}
         resp = retry(post, self.name, headers=headers, use_account=3)
         resp.read()
@@ -863,7 +863,7 @@ class TestContainer(unittest.TestCase):
         self.assertIn(self.name, listing)
 
         # can create new containers
-        new_container_name = str(uuid4())
+        new_container_name = uuidutils.generate_uuid()
         resp = retry(put, new_container_name, use_account=3)
         resp.read()
         self.assertEqual(resp.status, 201)
@@ -882,7 +882,7 @@ class TestContainer(unittest.TestCase):
         self.assertNotIn(new_container_name, listing)
 
         # even if they didn't create them
-        empty_container_name = str(uuid4())
+        empty_container_name = uuidutils.generate_uuid()
         resp = retry(put, empty_container_name, use_account=1)
         resp.read()
         self.assertEqual(resp.status, 201)
@@ -911,7 +911,7 @@ class TestContainer(unittest.TestCase):
             return check_response(conn)
 
         # add some metadata
-        value = str(uuid4())
+        value = uuidutils.generate_uuid()
         headers = {'x-container-meta-test': value}
         resp = retry(post, self.name, headers=headers, use_account=1)
         resp.read()
@@ -941,7 +941,7 @@ class TestContainer(unittest.TestCase):
         self.assertEqual(resp.getheader('X-Container-Meta-Test'), value)
 
         # read-write can also write container metadata
-        new_value = str(uuid4())
+        new_value = uuidutils.generate_uuid()
         headers = {'x-container-meta-test': new_value}
         resp = retry(post, self.name, headers=headers, use_account=3)
         resp.read()
@@ -1005,7 +1005,7 @@ class TestContainer(unittest.TestCase):
         self.assertIn(self.name, listing)
 
         # can create new containers
-        new_container_name = str(uuid4())
+        new_container_name = uuidutils.generate_uuid()
         resp = retry(put, new_container_name, use_account=3)
         resp.read()
         self.assertEqual(resp.status, 201)
@@ -1024,7 +1024,7 @@ class TestContainer(unittest.TestCase):
         self.assertNotIn(new_container_name, listing)
 
         # even if they didn't create them
-        empty_container_name = str(uuid4())
+        empty_container_name = uuidutils.generate_uuid()
         resp = retry(put, empty_container_name, use_account=1)
         resp.read()
         self.assertEqual(resp.status, 201)
@@ -1053,7 +1053,7 @@ class TestContainer(unittest.TestCase):
             return check_response(conn)
 
         # add some metadata
-        value = str(uuid4())
+        value = uuidutils.generate_uuid()
         headers = {'x-container-meta-test': value}
         resp = retry(post, self.name, headers=headers, use_account=1)
         resp.read()
@@ -1083,7 +1083,7 @@ class TestContainer(unittest.TestCase):
         self.assertEqual(resp.getheader('X-Container-Meta-Test'), value)
 
         # can also write container metadata
-        new_value = str(uuid4())
+        new_value = uuidutils.generate_uuid()
         headers = {'x-container-meta-test': new_value}
         resp = retry(post, self.name, headers=headers, use_account=3)
         resp.read()
@@ -1124,7 +1124,7 @@ class TestContainer(unittest.TestCase):
             return check_response(conn)
 
         # add some metadata
-        value = str(uuid4())
+        value = uuidutils.generate_uuid()
         headers = {
             'x-container-sync-key': 'secret',
             'x-container-meta-test': value,
@@ -1155,7 +1155,7 @@ class TestContainer(unittest.TestCase):
         self.assertEqual(resp.getheader('X-Container-Sync-Key'), None)
 
         # and can not write
-        headers = {'x-container-sync-key': str(uuid4())}
+        headers = {'x-container-sync-key': uuidutils.generate_uuid()}
         resp = retry(post, self.name, headers=headers, use_account=3)
         resp.read()
         self.assertEqual(resp.status, 403)
@@ -1183,9 +1183,9 @@ class TestContainer(unittest.TestCase):
         self.assertEqual(resp.getheader('X-Container-Sync-Key'), 'secret')
 
         # and can write
-        new_value = str(uuid4())
+        new_value = uuidutils.generate_uuid()
         headers = {
-            'x-container-sync-key': str(uuid4()),
+            'x-container-sync-key': uuidutils.generate_uuid()),
             'x-container-meta-test': new_value,
         }
         resp = retry(post, self.name, headers=headers, use_account=3)
@@ -1215,7 +1215,7 @@ class TestContainer(unittest.TestCase):
         self.assertEqual(resp.getheader('X-Container-Sync-Key'), 'secret')
 
         # admin tester3 can even change sync-key
-        new_secret = str(uuid4())
+        new_secret = uuidutils.generate_uuid()
         headers = {'x-container-sync-key': new_secret}
         resp = retry(post, self.name, headers=headers, use_account=3)
         resp.read()
@@ -1246,7 +1246,7 @@ class TestContainer(unittest.TestCase):
             return check_response(conn)
 
         # add some container acls
-        value = str(uuid4())
+        value = uuidutils.generate_uuid()
         headers = {
             'x-container-read': 'jdoe',
             'x-container-write': 'jdoe',
@@ -1313,7 +1313,7 @@ class TestContainer(unittest.TestCase):
         self.assertEqual(resp.getheader('X-Container-Write'), 'jdoe')
 
         # and can write
-        new_value = str(uuid4())
+        new_value = uuidutils.generate_uuid()
         headers = {
             'x-container-read': 'frank',
             'x-container-write': 'frank',
@@ -1348,7 +1348,7 @@ class TestContainer(unittest.TestCase):
         self.assertEqual(resp.getheader('X-Container-Write'), 'jdoe')
 
         # admin tester3 can even change container acls
-        new_value = str(uuid4())
+        new_value = uuidutils.generate_uuid()
         headers = {
             'x-container-read': '.r:*',
         }
@@ -1428,7 +1428,7 @@ class TestContainer(unittest.TestCase):
             return check_response(conn)
 
         # create
-        resp = retry(put, {'X-Storage-Policy': uuid4().hex})
+        resp = retry(put, {'X-Storage-Policy': uuidutils.generate_uuid(dashed=False)})
         resp.read()
         self.assertEqual(resp.status, 400)
 
@@ -1568,7 +1568,7 @@ class BaseTestContainerACLs(unittest.TestCase):
     def setUp(self):
         if tf.skip or tf.skip2 or tf.skip_if_not_v3:
             raise SkipTest('AUTH VERSION 3 SPECIFIC TEST')
-        self.name = uuid4().hex
+        self.name = uuidutils.generate_uuid(dashed=False)
 
         def put(url, token, parsed, conn):
             conn.request('PUT', parsed.path + '/' + self.name, '',
