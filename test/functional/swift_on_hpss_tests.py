@@ -34,8 +34,8 @@ class TestSwiftOnHPSS(unittest.TestCase):
                               tf.config.get('account',
                                             tf.config['username']))
         cls.container = cls.account.container('swiftonhpss_test')
-        cls.container.create(hdrs={'X-Storage-Policy': 'hpss'})
-        cls.hpss_dir = '/srv/swift/hpss'
+        cls.container.create(hdrs={'X-Storage-Policy': 'swiftonhpss'})
+        cls.hpss_dir = '/srv/hpss'
 
     @classmethod
     def tearDownClass(cls):
@@ -45,48 +45,65 @@ class TestSwiftOnHPSS(unittest.TestCase):
         self.test_file = self.container.file('testfile')
 
     def tearDown(self):
-        self.test_file.delete()
+        try:
+            self.test_file.delete()
+        except ResponseError as e:
+            if e.message != "Not Found":
+                raise
 
     def test_purge_lock(self):
-        self.test_file.write(data='test',
-                             hdrs={'X-Hpss-Purgelock-Status': 'true',
-                                   'X-Hpss-Class-Of-Service-Id': '3'})
+        resp = self.test_file.write(data='test',
+                                    hdrs={'X-Hpss-Purgelock-Status': 'true',
+                                          'X-Hpss-Class-Of-Service-Id': '1'},
+                                    return_resp=True)
+
+        print resp.status
+        print resp.getheaders()
+        print resp.read()
 
         test_file_name = os.path.join(self.hpss_dir,
                                       self.account.name,
                                       self.container.name,
                                       'testfile')
 
-        xattrs = dict(xattr.xattr(test_file_name))
-        self.assertEqual(xattrs['system.hpss.purgelock'], '1')
+        print test_file_name
+
+        print os.stat(test_file_name)
+
+        print xattr.listxattr(test_file_name)
+
+        self.assertEqual(xattr.get(test_file_name,
+                                   'system.hpss.purgelock'),
+                         '1')
 
         self.test_file.post(hdrs={'X-Hpss-Purgelock-Status': 'false'})
-        xattrs = dict(xattr.xattr(test_file_name))
-        self.assertEqual(xattrs['system.hpss.purgelock'], '0')
+
+        self.assertEqual(xattr.get(test_file_name,
+                                   'system.hpss.purgelock'), '0')
 
     def test_change_cos(self):
         self.test_file.write(data='asdfasdf',
-                             hdrs={'X-Hpss-Class-Of-Service-Id': '3'})
+                             hdrs={'X-Hpss-Class-Of-Service-Id': '2'})
 
         test_file_name = os.path.join(self.hpss_dir,
                                       self.account.name,
                                       self.container.name,
                                       'testfile')
 
-        time.sleep(30)  # It takes a long time for HPSS to get around to it.
-        xattrs = dict(xattr.xattr(test_file_name))
-        self.assertEqual(xattrs['system.hpss.cos'], '3')
+        print test_file_name
 
-        self.test_file.post(hdrs={'X-HPSS-Class-Of-Service-ID': '1'})
-        time.sleep(30)
-        xattrs = dict(xattr.xattr(test_file_name))
-        self.assertEqual(xattrs['system.hpss.cos'], '1')
+        time.sleep(10)  # It takes a long time for HPSS to get around to it.
+        self.assertEqual(xattr.get(test_file_name, 'system.hpss.cos'), '2')
+
+        self.test_file.post(hdrs={'X-Hpss-Class-Of-Service-Id': '1'})
+        time.sleep(10)
+        self.assertEqual(xattr.get(test_file_name, 'system.hpss.cos'), '1')
 
     def test_hpss_metadata(self):
         # header is X-HPSS-Get-Metadata
         self.test_file.write(data='test')
         self.connection.make_request('HEAD', self.test_file.path,
-                                     hdrs={'X-HPSS-Get-Metadata': 'true'})
+                                     hdrs={'X-Hpss-Get-Metadata': 'true'})
         md = {t[0]: t[1] for t in self.connection.response.getheaders()}
         print md
         self.assertTrue('x-hpss-account' in md)
