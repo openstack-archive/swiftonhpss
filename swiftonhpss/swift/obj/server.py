@@ -17,12 +17,7 @@
 
 import math
 import logging
-import xattr
 import os
-try:
-    import hpssfs
-except ImportError:
-    import swiftonhpss.swift.common.hpssfs_ioctl as hpssfs
 import time
 
 from hashlib import md5
@@ -47,7 +42,7 @@ from swift.common.ring import Ring
 
 from swiftonhpss.swift.obj.diskfile import DiskFileManager
 from swiftonhpss.swift.common.constraints import check_object_creation
-from swiftonhpss.swift.common import utils
+from swiftonhpss.swift.common import utils, hpss_utils
 
 
 class SwiftOnFileDiskFileRouter(object):
@@ -82,13 +77,30 @@ class ObjectController(server.ObjectController):
         self._diskfile_router = SwiftOnFileDiskFileRouter(conf, self.logger)
         self.swift_dir = conf.get('swift_dir', '/etc/swift')
         self.container_ring = None
-        # This conf option will be deprecated and eventualy removed in
+        # This conf option will be deprecated and eventually removed in
         # future releases
         utils.read_pickled_metadata = \
             config_true_value(conf.get('read_pickled_metadata', 'no'))
+
+        # HPSS-specific conf options
         self.allow_purgelock = \
             config_true_value(conf.get('allow_purgelock', True))
-        self.default_cos_id = conf.get('default_cos_id')
+        self.default_cos_id = conf.get('default_cos_id', '1')
+        self.hpss_principal = conf.get('hpss_user', 'swift')
+        self.hpss_auth_mech = conf.get('hpss_auth_mechanism', 'unix')
+        self.hpss_auth_cred_type = conf.get('hpss_auth_credential_type',
+                                            'keytab')
+        self.hpss_auth_creds = conf.get('hpss_auth_credential',
+                                        '/var/hpss/etc/hpss.unix.keytab')
+        self.hpss_uid = conf.get('hpss_uid', '300')
+        self.hpss_gid = conf.get('hpss_gid', '300')
+
+        self.logger.info("Creating HPSS session")
+
+        hpss_utils.create_hpss_session(self.hpss_principal,
+                                       self.hpss_auth_mech,
+                                       self.hpss_auth_cred_type,
+                                       self.hpss_auth_creds)
 
     def get_container_ring(self):
         """Get the container ring.  Load it, if it hasn't been yet."""
@@ -100,6 +112,7 @@ class ObjectController(server.ObjectController):
     @timing_stats()
     def PUT(self, request):
         """Handle HTTP PUT requests for the Swift on File object server"""
+
         try:
             device, partition, account, container, obj, policy = \
                 get_name_and_placement(request, 5, 5, True)
@@ -128,10 +141,15 @@ class ObjectController(server.ObjectController):
                                       request=request,
                                       content_type='text/plain')
 
+            self.logger.info("DiskFile @ %s/%s/%s/%s" %
+                             (device, account, container, obj))
+
             # Try to get DiskFile
             try:
                 disk_file = self.get_diskfile(device, partition, account,
-                                              container, obj, policy=policy)
+                                              container, obj, policy=policy,
+                                              uid=int(self.hpss_uid),
+                                              gid=int(self.hpss_gid))
             except DiskFileDeviceUnavailable:
                 return HTTPInsufficientStorage(drive=device, request=request)
 
@@ -158,22 +176,23 @@ class ObjectController(server.ObjectController):
             orig_delete_at = int(orig_metadata.get('X-Delete-At') or 0)
             upload_expiration = time.time() + self.max_upload_time
 
+            self.logger.info("Receiving and writing object")
+
             etag = md5()
             elapsed_time = 0
 
-            # (HPSS) Check for HPSS-specific metadata headers
-            cos = request.headers.get('X-Hpss-Class-Of-Service-Id',
-                                      self.default_cos_id)
+            hints = {'cos': request.headers.get('X-Hpss-Class-Of-Service-Id',
+                                                self.default_cos_id),
+                     'purgelock': request.headers.get('X-Hpss-Purgelock-Status',
+                                                      False)}
 
-            if self.allow_purgelock:
-                purgelock = config_true_value(
-                    request.headers.get('X-Hpss-Purgelock-Status', 'false'))
-            else:
-                purgelock = False
+            if request.headers['content-type'] == 'application/directory':
+                # handle directories different
+                pass
 
             try:
                 # Feed DiskFile our HPSS-specific stuff
-                with disk_file.create(size=fsize, cos=cos) as writer:
+                with disk_file.create(hpss_hints=hints) as writer:
                     upload_size = 0
 
                     def timeout_reader():
@@ -203,6 +222,8 @@ class ObjectController(server.ObjectController):
                             and request.headers['etag'].lower() != etag:
                         return HTTPUnprocessableEntity(request=request)
 
+                    self.logger.info("Writing object metadata")
+
                     # Update object metadata
                     content_type = request.headers['content-type']
                     metadata = {'X-Timestamp': request.timestamp.internal,
@@ -222,43 +243,18 @@ class ObjectController(server.ObjectController):
                             header_caps = header_key.title()
                             metadata[header_caps] = request.headers[header_key]
 
+                    self.logger.info("Finalizing object")
+
                     # (HPSS) Write the file, with added options
-                    writer.put(metadata, purgelock=purgelock)
+                    writer.put(metadata)
 
             except DiskFileNoSpace:
                 return HTTPInsufficientStorage(drive=device, request=request)
             except SwiftOnFileSystemIOError as e:
+                self.logger.error(e)
                 return HTTPServiceUnavailable(request=request)
 
-            # FIXME: this stuff really should be handled in DiskFile somehow?
-            # we set the hpss checksum in here, so both systems have valid
-            # and current checksum metadata
-
-            # (HPSS) Set checksum on file ourselves, if hpssfs won't do it
-            # for us.
-            data_file = disk_file._data_file
-            try:
-                xattr.setxattr(data_file, 'system.hpss.hash',
-                               "md5:%s" % etag)
-            except IOError:
-                logging.debug("Could not write ETag to system.hpss.hash,"
-                              " trying user.hash.checksum")
-                try:
-                    xattr.setxattr(data_file,
-                                   'user.hash.checksum', etag)
-                    xattr.setxattr(data_file,
-                                   'user.hash.algorithm', 'md5')
-                    xattr.setxattr(data_file,
-                                   'user.hash.state', 'Valid')
-                    xattr.setxattr(data_file,
-                                   'user.hash.filesize', str(upload_size))
-                    xattr.setxattr(data_file,
-                                   'user.hash.app', 'swiftonhpss')
-                except IOError as err:
-                    raise SwiftOnFileSystemIOError(
-                        err.errno,
-                        'Could not write MD5 checksum to HPSS filesystem: '
-                        '%s' % err.strerror)
+            self.logger.info("Writing container metadata")
 
             # Update container metadata
             if orig_delete_at != new_delete_at:
@@ -277,13 +273,15 @@ class ObjectController(server.ObjectController):
             self.container_update('PUT', account, container, obj, request,
                                   HeaderKeyDict(container_headers),
                                   device, policy)
+
+            self.logger.info("Done!")
             # Create convenience symlink
             try:
-                self._object_symlink(request, disk_file._data_file, device,
-                                     account)
+                self._project_symlink(request, disk_file, account)
             except SwiftOnFileSystemOSError:
                 logging.debug('could not make account symlink')
                 return HTTPServiceUnavailable(request=request)
+
             return HTTPCreated(request=request, etag=etag)
 
         except (AlreadyExistsAsFile, AlreadyExistsAsDir):
@@ -323,26 +321,33 @@ class ObjectController(server.ObjectController):
                 'x-etag': resp.headers['ETag']}),
             device, policy_idx)
 
-    def _object_symlink(self, request, diskfile, device, account):
-        mount = diskfile.split(device)[0]
-        dev = "%s%s" % (mount, device)
+    # FIXME: this should be in diskfile?
+    def _project_symlink(self, request, diskfile, account):
         project = None
+
+        diskfile_path = diskfile._data_file
+
+        hpss_root = diskfile_path.split(account)[0]
+
         if 'X-Project-Name' in request.headers:
             project = request.headers.get('X-Project-Name')
         elif 'X-Tenant-Name' in request.headers:
             project = request.headers.get('X-Tenant-Name')
+
         if project:
-            if project is not account:
-                accdir = "%s/%s" % (dev, account)
-                projdir = "%s%s" % (mount, project)
-                if not os.path.exists(projdir):
+            if project != account:
+                symlink_location = os.path.join(hpss_root, project)
+                account_location = os.path.join(hpss_root, account)
+                self.logger.info('symlink_location: %s' % symlink_location)
+                self.logger.info('account_location: %s' % account_location)
+                if not hpss_utils.path_exists(symlink_location):
                     try:
-                        os.symlink(accdir, projdir)
-                    except OSError as err:
+                        hpss_utils.relative_symlink(hpss_root, account, project)
+                    except IOError as err:
+                        self.logger.info('symlink failed, errno %s' % err.errno)
                         raise SwiftOnFileSystemOSError(
                             err.errno,
-                            ('%s, os.symlink("%s", ...)' %
-                             err.strerror, account))
+                            ('os.symlink("%s", ...)' % account))
 
     @public
     @timing_stats()
@@ -354,7 +359,9 @@ class ObjectController(server.ObjectController):
         # Get DiskFile
         try:
             disk_file = self.get_diskfile(device, partition, account,
-                                          container, obj, policy=policy)
+                                          container, obj, policy=policy,
+                                          uid=int(self.hpss_uid),
+                                          gid=int(self.hpss_gid))
 
         except DiskFileDeviceUnavailable:
             return HTTPInsufficientStorage(drive=device, request=request)
@@ -365,7 +372,7 @@ class ObjectController(server.ObjectController):
         try:
             with disk_file.open():
                 metadata = disk_file.get_metadata()
-                want_hpss_metadata = request.headers.get('X-HPSS-Get-Metadata',
+                want_hpss_metadata = request.headers.get('X-Hpss-Get-Metadata',
                                                          False)
                 if config_true_value(want_hpss_metadata):
                     try:
@@ -422,7 +429,9 @@ class ObjectController(server.ObjectController):
         # Get Diskfile
         try:
             disk_file = self.get_diskfile(device, partition, account,
-                                          container, obj, policy)
+                                          container, obj, policy,
+                                          uid=int(self.hpss_uid),
+                                          gid=int(self.hpss_gid))
         except DiskFileDeviceUnavailable:
             return HTTPInsufficientStorage(drive=device, request=request)
 
@@ -493,36 +502,22 @@ class ObjectController(server.ObjectController):
         # Get DiskFile
         try:
             disk_file = self.get_diskfile(device, partition, account,
-                                          container, obj, policy)
+                                          container, obj, policy,
+                                          uid=int(self.hpss_uid),
+                                          gid=int(self.hpss_gid))
         except DiskFileDeviceUnavailable:
             return HTTPInsufficientStorage(drive=device, request=request)
 
-        # Set Purgelock status if we got it
-        if self.allow_purgelock:
-            purgelock = request.headers.get('X-HPSS-Purgelock-Status')
-        else:
-            purgelock = False
-
-        if purgelock:
-            try:
-                hpssfs.ioctl(disk_file._fd, hpssfs.HPSSFS_PURGE_LOCK,
-                             int(purgelock))
-            except IOError as err:
-                raise SwiftOnFileSystemIOError(
-                    err.errno,
-                    '%s, xattr.getxattr("%s", ...)' %
-                    (err.strerror, disk_file._fd))
-
         # Set class of service if we got it
-        cos = request.headers.get('X-HPSS-Class-Of-Service-ID')
-        if cos:
-            try:
-                xattr.setxattr(disk_file._fd, 'system.hpss.cos', int(cos))
-            except IOError as err:
-                raise SwiftOnFileSystemIOError(
-                    err.errno,
-                    '%s, xattr.setxattr("%s", ...)' %
-                    (err.strerror, disk_file._fd))
+        new_cos = request.headers.get('X-HPSS-Class-Of-Service-Id', None)
+        if new_cos:
+            disk_file.set_cos(int(new_cos))
+
+        # Set purge lock status if we got it
+        if self.allow_purgelock:
+            purge_lock = request.headers.get('X-HPSS-Purgelock-Status', None)
+            if purge_lock is not None:
+                disk_file.set_purge_lock(purge_lock)
 
         # Update metadata from request
         try:
@@ -561,7 +556,9 @@ class ObjectController(server.ObjectController):
         req_timestamp = valid_timestamp(request)
         try:
             disk_file = self.get_diskfile(device, partition, account,
-                                          container, obj, policy)
+                                          container, obj, policy,
+                                          uid=int(self.hpss_uid),
+                                          gid=int(self.hpss_gid))
         except DiskFileDeviceUnavailable:
             return HTTPInsufficientStorage(drive=device, request=request)
 
