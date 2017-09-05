@@ -23,19 +23,13 @@ except ImportError:
     import random
 import logging
 import time
-try:
-    import hpssfs
-except ImportError:
-    import swiftonhpss.swift.common.hpssfs_ioctl as hpssfs
-import xattr
-from uuid import uuid4
 from hashlib import md5
 from eventlet import sleep
 from contextlib import contextmanager
 from swiftonhpss.swift.common.exceptions import AlreadyExistsAsFile, \
     AlreadyExistsAsDir
-from swift.common.utils import ThreadPool, hash_path, \
-    normalize_timestamp, fallocate, Timestamp
+from swift.common.utils import hash_path, \
+    normalize_timestamp, Timestamp
 from swift.common.exceptions import DiskFileNotExist, DiskFileError, \
     DiskFileNoSpace, DiskFileDeviceUnavailable, DiskFileNotOpen, \
     DiskFileExpired
@@ -44,17 +38,21 @@ from swift.common.swob import multi_range_iterator
 from swiftonhpss.swift.common.exceptions import SwiftOnFileSystemOSError, \
     SwiftOnFileSystemIOError
 from swiftonhpss.swift.common.fs_utils import do_fstat, do_open, do_close, \
-    do_unlink, do_chown, do_fsync, do_fchown, do_stat, do_write, do_read, \
-    do_fadvise64, do_rename, do_fdatasync, do_lseek, do_mkdir
+    do_unlink, do_chown, do_fsync, do_stat, do_write, do_read, \
+    do_rename, do_lseek, do_mkdir
 from swiftonhpss.swift.common.utils import read_metadata, write_metadata,\
     rmobjdir, dir_is_object, \
-    get_object_metadata, write_pickle, get_etag
+    get_object_metadata, write_pickle, get_etag, hex_digest_to_bytes
 from swiftonhpss.swift.common.utils import X_CONTENT_TYPE, \
     X_TIMESTAMP, X_TYPE, X_OBJECT_TYPE, FILE, OBJECT, DIR_TYPE, \
     FILE_TYPE, DEFAULT_UID, DEFAULT_GID, DIR_NON_OBJECT, DIR_OBJECT, \
     X_ETAG, X_CONTENT_LENGTH, X_MTIME
 from swift.obj.diskfile import DiskFileManager as SwiftDiskFileManager
 from swift.obj.diskfile import get_async_dir
+
+import swiftonhpss.swift.common.hpss_utils as hpss_utils
+
+import hpss.clapi as hpss
 
 # FIXME: Hopefully we'll be able to move to Python 2.7+ where O_CLOEXEC will
 # be back ported. See http://www.python.org/dev/peps/pep-0433/
@@ -201,7 +199,7 @@ def _adjust_metadata(fd, metadata):
     # detect if the object was changed from filesystem interface (non Swift)
     statinfo = do_fstat(fd)
     if stat.S_ISREG(statinfo.st_mode):
-        metadata[X_MTIME] = normalize_timestamp(statinfo.st_mtime)
+        metadata[X_MTIME] = normalize_timestamp(statinfo.hpss_st_mtime)
 
     metadata[X_TYPE] = OBJECT
     return metadata
@@ -226,22 +224,19 @@ class DiskFileManager(SwiftDiskFileManager):
     """
     def get_diskfile(self, device, partition, account, container, obj,
                      policy=None, **kwargs):
-        dev_path = self.get_dev_path(device, self.mount_check)
-        if not dev_path:
-            raise DiskFileDeviceUnavailable()
-        return DiskFile(self, dev_path, self.threadpools[device],
+        hpss_dir_name = conf.get('hpss_swift_dir', '/swift')
+        return DiskFile(self, hpss_dir_name,
                         partition, account, container, obj,
                         policy=policy, **kwargs)
 
     def pickle_async_update(self, device, account, container, obj, data,
                             timestamp, policy):
-        # This method invokes swiftonhpss's writepickle method.
-        # Is patching just write_pickle and calling parent method better ?
+        # This should be using the JSON blob stuff instead of a pickle.
+        # Didn't we deprecate it?
         device_path = self.construct_dev_path(device)
         async_dir = os.path.join(device_path, get_async_dir(policy))
         ohash = hash_path(account, container, obj)
-        self.threadpools[device].run_in_thread(
-            write_pickle,
+        write_pickle(
             data,
             os.path.join(async_dir, ohash[-3:], ohash + '-' +
                          normalize_timestamp(timestamp)),
@@ -267,6 +262,8 @@ class DiskFileWriter(object):
         self._upload_size = 0
         self._last_sync = 0
 
+        self._logger = self._disk_file._logger
+
     def _write_entire_chunk(self, chunk):
         bytes_per_sync = self._disk_file._mgr.bytes_per_sync
         while chunk:
@@ -276,8 +273,7 @@ class DiskFileWriter(object):
             # For large files sync every 512MB (by default) written
             diff = self._upload_size - self._last_sync
             if diff >= bytes_per_sync:
-                do_fdatasync(self._fd)
-                do_fadvise64(self._fd, self._last_sync, diff)
+                do_fsync(self._fd)
                 self._last_sync = self._upload_size
 
     def close(self):
@@ -299,34 +295,17 @@ class DiskFileWriter(object):
         :returns: the total number of bytes written to an object
         """
         df = self._disk_file
-        df._threadpool.run_in_thread(self._write_entire_chunk, chunk)
+        self._write_entire_chunk(chunk)
         return self._upload_size
 
-    def _finalize_put(self, metadata, purgelock=False):
+    def _finalize_put(self, metadata):
         # Write out metadata before fsync() to ensure it is also forced to
         # disk.
-        write_metadata(self._fd, metadata)
+        write_metadata(self._tmppath, metadata)
 
-        # We call fsync() before calling drop_cache() to lower the
-        # amount of redundant work the drop cache code will perform on
-        # the pages (now that after fsync the pages will be all
-        # clean).
         do_fsync(self._fd)
 
-        # (HPSS) Purge lock the file now if we're asked to.
-        if purgelock:
-            try:
-                hpssfs.ioctl(self._fd, hpssfs.HPSSFS_PURGE_LOCK,
-                             int(purgelock))
-            except IOError as err:
-                raise SwiftOnFileSystemIOError(
-                    err.errno,
-                    '%s, hpssfs.ioctl("%s", ...)' % (err.strerror, self._fd))
-
-        # From the Department of the Redundancy Department, make sure
-        # we call drop_cache() after fsync() to avoid redundant work
-        # (pages all clean).
-        do_fadvise64(self._fd, self._last_sync, self._upload_size)
+        self.set_checksum(metadata['ETag'])
 
         # At this point we know that the object's full directory path
         # exists, so we can just rename it directly without using Swift's
@@ -400,7 +379,7 @@ class DiskFileWriter(object):
         # in a thread.
         self.close()
 
-    def put(self, metadata, purgelock=False):
+    def put(self, metadata):
         """
         Finalize writing the file on disk, and renames it from the temp file
         to the real location.  This should be called after the data has been
@@ -416,8 +395,7 @@ class DiskFileWriter(object):
         df = self._disk_file
 
         if dir_is_object(metadata):
-            df._threadpool.force_run_in_thread(
-                df._create_dir_object, df._data_file, metadata)
+            df._create_dir_object(df._data_file, metadata)
             return
 
         if df._is_dir:
@@ -429,8 +407,7 @@ class DiskFileWriter(object):
                                      ' since the target, %s, already exists'
                                      ' as a directory' % df._data_file)
 
-        df._threadpool.force_run_in_thread(self._finalize_put, metadata,
-                                           purgelock)
+        self._finalize_put(metadata)
 
         # Avoid the unlink() system call as part of the mkstemp context
         # cleanup
@@ -445,6 +422,9 @@ class DiskFileWriter(object):
                           :class:`~swift.common.utils.Timestamp`
         """
         pass
+
+    def set_checksum(self, checksum):
+        hpss_utils.set_checksum(self._fd, checksum)
 
 
 class DiskFileReader(object):
@@ -465,18 +445,16 @@ class DiskFileReader(object):
         specific. The API does not define the constructor arguments.
 
     :param fp: open file descriptor, -1 for a directory object
-    :param threadpool: thread pool to use for read operations
     :param disk_chunk_size: size of reads from disk in bytes
     :param obj_size: size of object on disk
     :param keep_cache_size: maximum object size that will be kept in cache
     :param iter_hook: called when __iter__ returns a chunk
     :param keep_cache: should resulting reads be kept in the buffer cache
     """
-    def __init__(self, fd, threadpool, disk_chunk_size, obj_size,
+    def __init__(self, fd, disk_chunk_size, obj_size,
                  keep_cache_size, iter_hook=None, keep_cache=False):
         # Parameter tracking
         self._fd = fd
-        self._threadpool = threadpool
         self._disk_chunk_size = disk_chunk_size
         self._iter_hook = iter_hook
         if keep_cache:
@@ -496,8 +474,7 @@ class DiskFileReader(object):
             bytes_read = 0
             while True:
                 if self._fd != -1:
-                    chunk = self._threadpool.run_in_thread(
-                        do_read, self._fd, self._disk_chunk_size)
+                    chunk = do_read(self._fd, self._disk_chunk_size)
                 else:
                     chunk = None
                 if chunk:
@@ -555,9 +532,7 @@ class DiskFileReader(object):
                 self.close()
 
     def _drop_cache(self, offset, length):
-        """Method for no-oping buffer cache drop method."""
-        if not self._keep_cache and self._fd > -1:
-            do_fadvise64(self._fd, offset, length)
+        pass
 
     def close(self):
         """
@@ -581,25 +556,24 @@ class DiskFile(object):
 
     :param mgr: associated on-disk manager instance
     :param dev_path: device name/account_name for UFO.
-    :param threadpool: thread pool in which to do blocking operations
     :param account: account name for the object
     :param container: container name for the object
     :param obj: object name for the object
     :param uid: user ID disk object should assume (file or directory)
     :param gid: group ID disk object should assume (file or directory)
     """
-    def __init__(self, mgr, dev_path, threadpool, partition,
+    def __init__(self, mgr, dev_path, partition,
                  account=None, container=None, obj=None,
                  policy=None, uid=DEFAULT_UID, gid=DEFAULT_GID, **kwargs):
         # Variables partition and policy is currently unused.
         self._mgr = mgr
+        self._logger = mgr.logger
         self._device_path = dev_path
-        self._threadpool = threadpool or ThreadPool(nthreads=0)
-        self._uid = int(uid)
-        self._gid = int(gid)
+        self._uid = uid
+        self._gid = gid
         self._is_dir = False
         self._metadata = None
-        self._fd = None
+        self._fd = -1
         # Save stat info as internal variable to avoid multiple stat() calls
         self._stat = None
         # Save md5sum of object as internal variable to avoid reading the
@@ -609,9 +583,11 @@ class DiskFile(object):
         # Don't store a value for data_file until we know it exists.
         self._data_file = None
 
-        # Account name contains resller_prefix which is retained and not
+        self._obj_size = 0
+
+        # Account name contains reseller_prefix which is retained and not
         # stripped. This to conform to Swift's behavior where account name
-        # entry in Account DBs contain resller_prefix.
+        # entry in Account DBs contain reseller_prefix.
         self._account = account
         self._container = container
 
@@ -628,7 +604,6 @@ class DiskFile(object):
             self._put_datadir = self._container_path
 
         self._data_file = os.path.join(self._put_datadir, self._obj)
-        self._stat = do_stat(self._data_file)
 
     @property
     def timestamp(self):
@@ -662,7 +637,15 @@ class DiskFile(object):
         """
         # Writes are always performed to a temporary file
         try:
-            self._fd = do_open(self._data_file, os.O_RDONLY | O_CLOEXEC)
+            self._logger.debug("DiskFile: Opening %s" % self._data_file)
+            self._stat = do_stat(self._data_file)
+            self._is_dir = stat.S_ISDIR(self._stat.st_mode)
+            if not self._is_dir:
+                self._fd = do_open(self._data_file, hpss.O_RDONLY)
+                self._obj_size = self._stat.st_size
+            else:
+                self._fd = -1
+                self._obj_size = 0
         except SwiftOnFileSystemOSError as err:
             if err.errno in (errno.ENOENT, errno.ENOTDIR):
                 # If the file does exist, or some part of the path does not
@@ -670,25 +653,18 @@ class DiskFile(object):
                 raise DiskFileNotExist
             raise
         try:
-            self._stat = do_fstat(self._fd)
-            self._is_dir = stat.S_ISDIR(self._stat.st_mode)
-            obj_size = self._stat.st_size
-
-            self._metadata = read_metadata(self._fd)
+            self._logger.debug("DiskFile: Reading metadata")
+            self._metadata = read_metadata(self._data_file)
             if not self._validate_object_metadata():
-                self._create_object_metadata(self._fd)
+                self._create_object_metadata(self._data_file)
 
             assert self._metadata is not None
             self._filter_metadata()
 
-            if self._is_dir:
-                do_close(self._fd)
-                obj_size = 0
-                self._fd = -1
-            else:
+            if not self._is_dir:
                 if self._is_object_expired(self._metadata):
                     raise DiskFileExpired(metadata=self._metadata)
-            self._obj_size = obj_size
+
         except (OSError, IOError, DiskFileExpired) as err:
             # Something went wrong. Context manager will not call
             # __exit__. So we close the fd manually here.
@@ -730,9 +706,9 @@ class DiskFile(object):
                 # Check if the file has been modified through filesystem
                 # interface by comparing mtime stored in xattr during PUT
                 # and current mtime of file.
-                obj_stat = os.stat(self._data_file)
+                obj_stat = do_stat(self._data_file)
                 if normalize_timestamp(self._metadata[X_MTIME]) != \
-                        normalize_timestamp(obj_stat.st_mtime):
+                        normalize_timestamp(obj_stat.hpss_st_mtime):
                     self._file_has_changed = True
                     return False
             else:
@@ -755,10 +731,10 @@ class DiskFile(object):
 
         return False
 
-    def _create_object_metadata(self, fd):
+    def _create_object_metadata(self, file_path):
         if self._etag is None:
             self._etag = md5().hexdigest() if self._is_dir \
-                else get_etag(fd)
+                else get_etag(file_path)
 
         if self._file_has_changed or (X_TIMESTAMP not in self._metadata):
             timestamp = normalize_timestamp(self._stat.st_mtime)
@@ -775,12 +751,12 @@ class DiskFile(object):
 
         # Add X_MTIME key if object is a file
         if not self._is_dir:
-            metadata[X_MTIME] = normalize_timestamp(self._stat.st_mtime)
+            metadata[X_MTIME] = normalize_timestamp(self._stat.hpss_st_mtime)
 
         meta_new = self._metadata.copy()
         meta_new.update(metadata)
         if self._metadata != meta_new:
-            write_metadata(fd, meta_new)
+            write_metadata(file_path, meta_new)
             # Avoid additional read_metadata() later
             self._metadata = meta_new
 
@@ -799,7 +775,7 @@ class DiskFile(object):
             pass
         except ValueError:
             # x-delete-at key is present but not an integer.
-            # TODO: Openstack Swift "quarrantines" the object.
+            # TODO: Openstack Swift "quarantines" the object.
             # We just let it pass
             pass
         else:
@@ -807,50 +783,16 @@ class DiskFile(object):
                 return True
         return False
 
+    # TODO: don't parse this, just grab data structure
     def is_offline(self):
-        try:
-            raw_file_levels = xattr.getxattr(self._data_file,
-                                             "system.hpss.level")
-        except IOError as err:
-            raise SwiftOnFileSystemIOError(
-                err.errno,
-                '%s, xattr.getxattr("system.hpss.level", ...)' % err.strerror
-            )
-        try:
-            file_levels = raw_file_levels.split(";")
-            top_level = file_levels[0].split(':')
-            bytes_on_disk = top_level[2].rstrip(' ')
-            if bytes_on_disk == 'nodata':
-                bytes_on_disk = '0'
-        except ValueError:
-            raise SwiftOnFileSystemIOError("Couldn't get system.hpss.level!")
+        meta = hpss_utils.read_hpss_system_metadata(self._data_file)
+        raw_file_levels = meta['X-HPSS-Data-Levels']
+        file_levels = raw_file_levels.split(";")
+        top_level = file_levels[0].split(':')
+        bytes_on_disk = top_level[2].rstrip(' ')
+        if bytes_on_disk == 'nodata':
+            bytes_on_disk = '0'
         return int(bytes_on_disk) != self._stat.st_size
-
-    def read_hpss_system_metadata(self):
-        header_to_xattr = {'X-HPSS-Account': 'account',
-                           'X-HPSS-Bitfile-ID': 'bitfile',
-                           'X-HPSS-Comment': 'comment',
-                           'X-HPSS-Class-Of-Service-ID': 'cos',
-                           'X-HPSS-Data-Levels': 'level',
-                           'X-HPSS-Family-ID': 'family',
-                           'X-HPSS-Fileset-ID': 'fileset',
-                           'X-HPSS-Optimum-Size': 'optimum',
-                           'X-HPSS-Purgelock-Status': 'purgelock',
-                           'X-HPSS-Reads': 'reads',
-                           'X-HPSS-Realm-ID': 'realm',
-                           'X-HPSS-Subsys-ID': 'subsys',
-                           'X-HPSS-Writes': 'writes', }
-        result = {}
-        for header in header_to_xattr:
-            xattr_to_get = 'system.hpss.%s' % header_to_xattr[header]
-            try:
-                result[header] = xattr.getxattr(self._data_file,
-                                                xattr_to_get)
-            except IOError as err:
-                error_message = "Couldn't get HPSS xattr %s from file %s" \
-                                % (xattr_to_get, self._data_file)
-                raise SwiftOnFileSystemIOError(err.errno, error_message)
-        return result
 
     def __enter__(self):
         """
@@ -858,7 +800,7 @@ class DiskFile(object):
 
         .. note::
 
-            An implemenation shall raise `DiskFileNotOpen` when has not
+            An implementation shall raise `DiskFileNotOpen` when has not
             previously invoked the :func:`swift.obj.diskfile.DiskFile.open`
             method.
         """
@@ -913,14 +855,19 @@ class DiskFile(object):
         # validation and resulting timeouts
         # This means we do a few things DiskFile.open() does.
         try:
-            self._is_dir = os.path.isdir(self._data_file)
+            if not self._stat:
+                self._stat = do_stat(self._data_file)
+            self._is_dir = stat.S_ISDIR(self._stat.st_mode)
             self._metadata = read_metadata(self._data_file)
-        except IOError:
+        except SwiftOnFileSystemOSError:
             raise DiskFileNotExist
         if not self._validate_object_metadata():
             self._create_object_metadata(self._data_file)
         self._filter_metadata()
         return self._metadata
+
+    def read_hpss_system_metadata(self):
+        return hpss_utils.read_hpss_system_metadata(self._data_file)
 
     def reader(self, iter_hook=None, keep_cache=False):
         """
@@ -939,7 +886,7 @@ class DiskFile(object):
         if self._metadata is None:
             raise DiskFileNotOpen()
         dr = DiskFileReader(
-            self._fd, self._threadpool, self._mgr.disk_chunk_size,
+            self._fd, self._mgr.disk_chunk_size,
             self._obj_size, self._mgr.keep_cache_size,
             iter_hook=iter_hook, keep_cache=keep_cache)
         # At this point the reader object is now responsible for closing
@@ -1004,7 +951,7 @@ class DiskFile(object):
         return True, newmd
 
     @contextmanager
-    def create(self, size, cos):
+    def create(self, hpss_hints):
         """
         Context manager to create a file. We create a temporary file first, and
         then return a DiskFileWriter object to encapsulate the state.
@@ -1021,67 +968,66 @@ class DiskFile(object):
             preallocations even if the parameter is specified. But if it does
             and it fails, it must raise a `DiskFileNoSpace` exception.
 
-        :param cos:
-        :param size: optional initial size of file to explicitly allocate on
-                     disk
+        :param hpss_hints: dict containing HPSS class of service hints
         :raises DiskFileNoSpace: if a size is specified and allocation fails
         :raises AlreadyExistsAsFile: if path or part of a path is not a \
                                      directory
         """
         # Create /account/container directory structure on mount point root
         try:
-            os.makedirs(self._container_path)
+            self._logger.debug("DiskFile: Creating directories for %s" %
+                              self._container_path)
+            hpss_utils.makedirs(self._container_path)
         except OSError as err:
             if err.errno != errno.EEXIST:
                 raise
 
+        # Create directories to object name, if they don't exist.
+        self._logger.debug("DiskFile: creating directories in obj name %s" %
+                          self._obj)
+        object_dirs = os.path.split(self._obj)[0]
+        self._logger.debug("object_dirs: %s" % repr(object_dirs))
+        self._logger.debug("data_dir: %s" % self._put_datadir)
+        hpss_utils.makedirs(os.path.join(self._put_datadir, object_dirs))
+
         data_file = os.path.join(self._put_datadir, self._obj)
 
-        # Assume the full directory path exists to the file already, and
-        # construct the proper name for the temporary file.
+        # Create the temporary file
         attempts = 1
         while True:
-            # To know more about why following temp file naming convention is
-            # used, please read this GlusterFS doc:
-            # https://github.com/gluster/glusterfs/blob/master/doc/features/dht.md#rename-optimizations  # noqa
-            tmpfile = '.' + self._obj + '.' + uuid4().hex
+            tmpfile = '.%s.%s.temporary' % (self._obj, random.randint(0, 65536))
             tmppath = os.path.join(self._put_datadir, tmpfile)
+            self._logger.debug("DiskFile: Creating temporary file %s" %
+                               tmppath)
+
             try:
+                # TODO: figure out how to create hints struct, pass it into open
+                self._logger.debug("DiskFile: creating file")
                 fd = do_open(tmppath,
-                             os.O_WRONLY | os.O_CREAT | os.O_EXCL | O_CLOEXEC)
-
-                if size:
-                    try:
-                        hpssfs.ioctl(fd, hpssfs.HPSSFS_SET_FSIZE_HINT,
-                                     long(size))
-                    except IOError as err:
-                        message = '%s, hpssfs.ioctl("%s", SET_FSIZE)'
-                        raise SwiftOnFileSystemIOError(
-                            err.errno,
-                            message % (err.strerror, fd))
-
-                if cos:
-                    try:
-                        hpssfs.ioctl(fd, hpssfs.HPSSFS_SET_COS_HINT, int(cos))
-                    except IOError as err:
-                        message = '%s, hpssfs.ioctl("%s", SET_COS)'
-                        raise SwiftOnFileSystemIOError(
-                            err.errno,
-                            message % (err.strerror, fd))
+                             hpss.O_WRONLY | hpss.O_CREAT | hpss.O_EXCL)
+                self._logger.debug("DiskFile: setting COS")
+                if hpss_hints['cos']:
+                    hpss_utils.set_cos(tmppath, int(hpss_hints['cos']))
 
             except SwiftOnFileSystemOSError as gerr:
                 if gerr.errno in (errno.ENOSPC, errno.EDQUOT):
                     # Raise DiskFileNoSpace to be handled by upper layers when
                     # there is no space on disk OR when quota is exceeded
+                    self._logger.error("DiskFile: no space")
+                    raise DiskFileNoSpace()
+                if gerr.errno == errno.EACCES:
+                    self._logger.error("DiskFile: permission denied")
                     raise DiskFileNoSpace()
                 if gerr.errno == errno.ENOTDIR:
+                    self._logger.error("DiskFile: not a directory")
                     raise AlreadyExistsAsFile('do_open(): failed on %s,'
                                               '  path or part of a'
                                               ' path is not a directory'
-                                              % (tmppath))
+                                              % data_file)
 
                 if gerr.errno not in (errno.ENOENT, errno.EEXIST, errno.EIO):
                     # FIXME: Other cases we should handle?
+                    self._logger.error("DiskFile: unknown error %s" % gerr.errno)
                     raise
                 if attempts >= MAX_OPEN_ATTEMPTS:
                     # We failed after N attempts to create the temporary
@@ -1093,50 +1039,18 @@ class DiskFile(object):
                                             attempts, MAX_OPEN_ATTEMPTS,
                                             data_file))
                 if gerr.errno == errno.EEXIST:
+                    self._logger.debug("DiskFile: file exists already")
                     # Retry with a different random number.
                     attempts += 1
-                elif gerr.errno == errno.EIO:
-                    # FIXME: Possible FUSE issue or race condition, let's
-                    # sleep on it and retry the operation.
-                    _random_sleep()
-                    logging.warn("DiskFile.mkstemp(): %s ... retrying in"
-                                 " 0.1 secs", gerr)
-                    attempts += 1
-                elif not self._obj_path:
-                    # No directory hierarchy and the create failed telling us
-                    # the container or volume directory does not exist. This
-                    # could be a FUSE issue or some race condition, so let's
-                    # sleep a bit and retry.
-                    _random_sleep()
-                    logging.warn("DiskFile.mkstemp(): %s ... retrying in"
-                                 " 0.1 secs", gerr)
-                    attempts += 1
-                elif attempts > 1:
-                    # Got ENOENT after previously making the path. This could
-                    # also be a FUSE issue or some race condition, nap and
-                    # retry.
-                    _random_sleep()
-                    logging.warn("DiskFile.mkstemp(): %s ... retrying in"
-                                 " 0.1 secs" % gerr)
-                    attempts += 1
-                else:
-                    # It looks like the path to the object does not already
-                    # exist; don't count this as an attempt, though, since
-                    # we perform the open() system call optimistically.
-                    self._create_dir_object(self._obj_path)
             else:
                 break
         dw = None
+
+        self._logger.debug("DiskFile: created file")
+
         try:
-            if size is not None and size > 0:
-                try:
-                    fallocate(fd, size)
-                except OSError as err:
-                    if err.errno in (errno.ENOSPC, errno.EDQUOT):
-                        raise DiskFileNoSpace()
-                    raise
             # Ensure it is properly owned before we make it available.
-            do_fchown(fd, self._uid, self._gid)
+            do_chown(tmppath, self._uid, self._gid)
             dw = DiskFileWriter(fd, tmppath, self)
             yield dw
         finally:
@@ -1157,8 +1071,7 @@ class DiskFile(object):
         """
         metadata = self._keep_sys_metadata(metadata)
         data_file = os.path.join(self._put_datadir, self._obj)
-        self._threadpool.run_in_thread(
-            write_metadata, data_file, metadata)
+        write_metadata(data_file, metadata)
 
     def _keep_sys_metadata(self, metadata):
         """
@@ -1221,6 +1134,12 @@ class DiskFile(object):
             else:
                 dirname = os.path.dirname(dirname)
 
+    def set_cos(self, cos_id):
+        hpss_utils.set_cos(self._data_file, cos_id)
+
+    def set_purge_lock(self, purgelock):
+        hpss_utils.set_purge_lock(self._data_file, purgelock)
+
     def delete(self, timestamp):
         """
         Delete the object.
@@ -1247,7 +1166,7 @@ class DiskFile(object):
             if metadata[X_TIMESTAMP] >= timestamp:
                 return
 
-        self._threadpool.run_in_thread(self._unlinkold)
+        self._unlinkold()
 
         self._metadata = None
         self._data_file = None
