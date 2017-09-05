@@ -28,9 +28,9 @@ from swiftonhpss.swift.common.exceptions import SwiftOnFileSystemIOError
 from swift.common.exceptions import DiskFileNoSpace
 from swift.common.db import utf8encodekeys
 from swiftonhpss.swift.common.fs_utils import do_stat, \
-    do_walk, do_rmdir, do_log_rl, get_filename_from_fd, do_open, \
+    do_walk, do_rmdir, do_log_rl, do_open, \
     do_getxattr, do_setxattr, do_removexattr, do_read, \
-    do_close, do_dup, do_lseek, do_fstat, do_fsync, do_rename
+    do_close, do_fsync, do_rename
 from urllib import quote, unquote
 
 X_CONTENT_TYPE = 'Content-Type'
@@ -54,6 +54,20 @@ PICKLE_PROTOCOL = 2
 CHUNK_SIZE = 65536
 
 read_pickled_metadata = False
+
+
+def chunk_list(input_list, chunk_size):
+    chunks = []
+    if len(input_list) % chunk_size != 0:
+        raise IndexError
+    for i in xrange(0, len(input_list) / chunk_size):
+        chunks.append(input_list[i * chunk_size:(i + 1)*chunk_size])
+    return chunks
+
+
+def hex_digest_to_bytes(hex_digest):
+    return ''.join([chr(int(chunk, 16)) for chunk
+                    in chunk_list(hex_digest, 2)])
 
 
 def normalize_timestamp(timestamp):
@@ -138,7 +152,7 @@ def deserialize_metadata(in_metastr):
         return {}
 
 
-def read_metadata(path_or_fd):
+def read_metadata(path):
     """
     Helper function to read the serialized metadata from a File/Directory.
 
@@ -150,7 +164,7 @@ def read_metadata(path_or_fd):
     key = 0
     try:
         while True:
-            metastr += do_getxattr(path_or_fd, '%s%s' %
+            metastr += do_getxattr(path, '%s%s' %
                                    (METADATA_KEY, (key or '')))
             key += 1
             if len(metastr) < MAX_XATTR_SIZE:
@@ -167,13 +181,13 @@ def read_metadata(path_or_fd):
     if not metadata:
         # Empty dict i.e deserializing of metadata has failed, probably
         # because it is invalid or incomplete or corrupt
-        clean_metadata(path_or_fd)
+        clean_metadata(path)
 
     assert isinstance(metadata, dict)
     return metadata
 
 
-def write_metadata(path_or_fd, metadata):
+def write_metadata(path, metadata):
     """
     Helper function to write serialized metadata for a File/Directory.
 
@@ -185,39 +199,34 @@ def write_metadata(path_or_fd, metadata):
     key = 0
     while metastr:
         try:
-            do_setxattr(path_or_fd,
+            do_setxattr(path,
                         '%s%s' % (METADATA_KEY, key or ''),
                         metastr[:MAX_XATTR_SIZE])
         except IOError as err:
             if err.errno in (errno.ENOSPC, errno.EDQUOT):
-                if isinstance(path_or_fd, int):
-                    filename = get_filename_from_fd(path_or_fd)
-                    do_log_rl("write_metadata(%d, metadata) failed: %s : %s",
-                              path_or_fd, err, filename)
-                else:
-                    do_log_rl("write_metadata(%s, metadata) failed: %s",
-                              path_or_fd, err)
+                do_log_rl("write_metadata(%s, metadata) failed: %s",
+                          path, err)
                 raise DiskFileNoSpace()
             else:
                 raise SwiftOnFileSystemIOError(
                     err.errno,
                     '%s, setxattr("%s", %s, metastr)' % (err.strerror,
-                                                         path_or_fd, key))
+                                                         path, key))
         metastr = metastr[MAX_XATTR_SIZE:]
         key += 1
 
 
-def clean_metadata(path_or_fd):
+def clean_metadata(path):
     key = 0
     while True:
         try:
-            do_removexattr(path_or_fd, '%s%s' % (METADATA_KEY, (key or '')))
+            do_removexattr(path, '%s%s' % (METADATA_KEY, (key or '')))
         except IOError as err:
             if err.errno == errno.ENODATA:
                 break
             raise SwiftOnFileSystemIOError(
                 err.errno, '%s, removexattr("%s", %s)' % (err.strerror,
-                                                          path_or_fd, key))
+                                                          path, key))
         key += 1
 
 
@@ -238,7 +247,7 @@ def _read_for_etag(fp):
     return etag.hexdigest()
 
 
-def get_etag(path_or_fd):
+def get_etag(path):
     """
     FIXME: It would be great to have a translator that returns the md5sum() of
     the file as an xattr that can be simply fetched.
@@ -246,43 +255,22 @@ def get_etag(path_or_fd):
     Since we don't have that we should yield after each chunk read and
     computed so that we don't consume the worker thread.
     """
-    etag = ''
-    if isinstance(path_or_fd, int):
-        # We are given a file descriptor, so this is an invocation from the
-        # DiskFile.open() method.
-        fd = path_or_fd
-        dup_fd = do_dup(fd)
-        try:
-            etag = _read_for_etag(dup_fd)
-            do_lseek(fd, 0, os.SEEK_SET)
-        finally:
-            do_close(dup_fd)
-    else:
-        # We are given a path to the object when the DiskDir.list_objects_iter
-        # method invokes us.
-        path = path_or_fd
-        fd = do_open(path, os.O_RDONLY)
-        try:
-            etag = _read_for_etag(fd)
-        finally:
-            do_close(fd)
+    # FIXME: really do need to grab precomputed checksum instead
+    fd = do_open(path, os.O_RDONLY)
+    try:
+        etag = _read_for_etag(fd)
+    finally:
+        do_close(fd)
 
     return etag
 
 
-def get_object_metadata(obj_path_or_fd, stats=None):
+def get_object_metadata(obj_path, stats=None):
     """
     Return metadata of object.
     """
     if not stats:
-        if isinstance(obj_path_or_fd, int):
-            # We are given a file descriptor, so this is an invocation from the
-            # DiskFile.open() method.
-            stats = do_fstat(obj_path_or_fd)
-        else:
-            # We are given a path to the object when the
-            # DiskDir.list_objects_iter method invokes us.
-            stats = do_stat(obj_path_or_fd)
+        stats = do_stat(obj_path)
 
     if not stats:
         metadata = {}
@@ -290,12 +278,12 @@ def get_object_metadata(obj_path_or_fd, stats=None):
         is_dir = stat.S_ISDIR(stats.st_mode)
         metadata = {
             X_TYPE: OBJECT,
-            X_TIMESTAMP: normalize_timestamp(stats.st_ctime),
+            X_TIMESTAMP: normalize_timestamp(stats.hpss_st_ctime),
             X_CONTENT_TYPE: DIR_TYPE if is_dir else FILE_TYPE,
             X_OBJECT_TYPE: DIR_NON_OBJECT if is_dir else FILE,
             X_CONTENT_LENGTH: 0 if is_dir else stats.st_size,
-            X_MTIME: 0 if is_dir else normalize_timestamp(stats.st_mtime),
-            X_ETAG: md5().hexdigest() if is_dir else get_etag(obj_path_or_fd)}
+            X_MTIME: 0 if is_dir else normalize_timestamp(stats.hpss_st_mtime),
+            X_ETAG: md5().hexdigest() if is_dir else get_etag(obj_path)}
     return metadata
 
 
