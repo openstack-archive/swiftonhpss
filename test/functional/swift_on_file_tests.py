@@ -25,9 +25,7 @@ from test.functional.swift_test_client import Account, Connection, \
     ResponseError
 import test.functional as tf
 
-# PGB - changed 'AUTH_' hardcoded reseller prefix to 'KEY_'.
 # TODO: read Swift proxy config for this
-
 
 class TestSwiftOnFileEnv:
     @classmethod
@@ -37,14 +35,13 @@ class TestSwiftOnFileEnv:
         cls.account = Account(cls.conn, tf.config.get('account',
                                                       tf.config['username']))
 
-        # PGB - change hardcoded SoF mountpoint
         #cls.root_dir = os.path.join('/mnt/swiftonhpss/test')
-        cls.root_dir = os.path.join('/srv/swift/hpss')
+        cls.root_dir = os.path.join('/srv/hpss')
         cls.account.delete_containers()
 
         cls.file_size = 8
         cls.container = cls.account.container(Utils.create_name())
-        if not cls.container.create(None, None):
+        if not cls.container.create(hdrs={'X-Storage-Policy': 'swiftonhpss'}):
             raise ResponseError(cls.conn.response)
 
         cls.dirs = [
@@ -133,6 +130,15 @@ class TestSwiftOnFile(Base):
         file_item.write_random()
         self.assert_status(201)
         file_info = file_item.info()
+
+        print self.env.root_dir
+        print self.env.account.name
+        print self.env.container.name
+        print file_name
+
+        print os.listdir(self.env.root_dir)
+        print os.listdir(os.path.join(self.env.root_dir,
+                                      self.env.account.name))
 
         with open(os.path.join(self.env.root_dir,
                                self.env.account.name,
