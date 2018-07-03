@@ -30,7 +30,7 @@ This guide also makes assumptions on your:
 * Client machine: running RHEL 7.1 on a reasonably modern x86-64 processor,
   with Internet access for the duration of the install and LAN connectivity
   to the HPSS core and movers at all times.
-* HPSS installation: HPSS 7.4.3p2 or newer, using UNIX authentication with
+* HPSS installation: HPSS 7.5 or newer, using UNIX authentication with
   local or system passwd files
 * OpenStack infrastructure: that there exists a Keystone server already,
   configured with a service tenant and 'swift' service account.
@@ -39,11 +39,7 @@ This guide also makes assumptions on your:
 [[X2]]
 Initial Considerations
 ----------------------
-Contact your HPSS support representative for copies of the FUSE driver and
-client RPMs for the specific version of HPSS that is running on your site. We
-have only tested with HPSS FUSE 2.01 and newer.
-
-Install the HPSS client and HPSS FUSE. This machine will run a stand-alone
+Install the HPSS client. This machine will run a stand-alone
 Swift node with SwiftOnHPSS.
 
 Add a 'swift' service user in HPSS and on the client machine:
@@ -51,68 +47,6 @@ Add a 'swift' service user in HPSS and on the client machine:
 ----
  # adduser swift
  # /opt/hpss/bin/hpss_unix_user add swift
-----
-
-Next, create a few FUSE mount points. For the account and container servers, 
-create a local directory (we have it at /srv/swift/hpss_meta) and use FUSE to
-mount it to a directory in HPSS (we use /swift/meta). For the object
-server, we're using /srv/swift/hpss to mount /swift/objects. Specific
-commands are as shown below.
-
-[WARNING]
-.Choose the classes of service carefully!
-===============================================================================
-For the Swift metadata mount point, be sure to choose a COS that:
-
-* Is geared towards 'small' files
-* Has a migration policy to tape, AND
-* [red]*Does not purge anything from disk!*
-
-Otherwise, Swift will not perform very well at all if not accessed for some
-time!
-
-For the Swift object mount point, choose a COS that can accept a wide range
-of file sizes. Migration and purge policies and storage hierarchy can be
-as desired.
-===============================================================================
-
-.Creating the mountpoints
------
-# export SWIFT_COS=1 # Replace this with metadata COS
-# export SWIFT_COS=2 # Replace this with object COS
-# /opt/hpss/bin/scrub
-scrub> mkdir /swift
-scrub> mkdir /swift/meta
-scrub> mkdir /swift/objects
-scrub> quit
-# mkdir -p /srv/swift/hpss
-# vim /etc/fstab
------
-
-.Example /etc/fstab
-[source,conf]
-----
-#
-# /etc/fstab
-# Created by anaconda on Tue Sep 22 18:37:31 2015
-#
-# Accessible filesystems, by reference, are maintained under '/dev/disk'
-# See man pages fstab(5), findfs(8), mount(8) and/or blkid(8) for more info
-#
-UUID=34658c22-0e55-4e01-b225-742afd5da2fe /                       ext4    defaults     1 1
-UUID=5b1f787b-0e8d-49b4-aa6f-eb5600a2516d /boot                   ext4    defaults     1 2
-UUID=c3e6347e-a8bc-4b5e-9477-1bf98c31a032 /localhome              ext4    defaults     1 2
-UUID=ed54b2eb-e96d-4de9-8722-44f51c31140b swap                    swap    defaults     0 0
-
-/dev/mapper/mpathd                        /db2_backup             ext4    defaults     0 0
-/dev/mapper/mpathf                        /db2_log                ext4    defaults     0 0
-/dev/mapper/mpatha                        /fake_resources         ext4    defaults     0 0
-/dev/mapper/mpathc                        /hpss_tbspc             ext4    defaults     0 0
-/dev/mapper/mpathe                        /var/hpss               ext4    defaults     0 0
-
-# Replace the COS number with the COS number chosen above.
-/swift/objects /srv/swift/hpss      hpssfs rw,noauto,allow_other,cksum=md5,nch=g,cos=1 0 0
-/swift/meta    /srv/swift/hpss_meta hpssfs rw,noauto,allow_other,cos=2 0 0
 ----
 
 Also, make sure that the /swift folder in HPSS is owned by the 'swift' service
@@ -181,8 +115,8 @@ driver = hpss_keystone.identity.Identity
 [[X5]]
 Install and Configure SwiftOnHPSS
 ---------------------------------
-We have tested SwiftOnHPSS against the Kilo stable release of Swift.
-Download the Kilo release of Swift (https://launchpad.net/swift/juno/2.2.0, or
+We have tested SwiftOnHPSS against the Liberty stable release of Swift.
+Download the Liberty release of Swift (https://launchpad.net/swift/liberty/2.5.0, or
 more optimally from https://github.com/openstack/swift) and install it.
 Additionally, install the 'keystonemiddleware' library using Pip if you are
 using Keystone.
@@ -190,8 +124,8 @@ using Keystone.
 ----
 # mkdir /opt/openstack
 # cd /opt/openstack
-# git clone https://github.com/openstack/swift stable/kilo
-# git clone https://github.com/openstack/keystone stable/kilo
+# git clone https://github.com/openstack/swift stable/liberty
+# git clone https://github.com/openstack/keystone stable/liberty
 # git clone https://github.com/hpss-collaboration/swiftonhpss
 # pip install keystonemiddleware
 # pip install -r swift/requirements.txt
@@ -201,8 +135,8 @@ using Keystone.
 # python setup.py develop
 ----
 
-Contact your HPSS support representative for the 'hpss', 'hpssfs' and
-'swiftonhpss' Python libraries appropriate for your site's version of HPSS.
+Contact your HPSS support representative for the 'hpss' Python library
+appropriate for your site's version of HPSS.
 Upon receipt of those libraries, install them. Assuming the libraries are in
 /opt/hpss_lib:
 
@@ -234,81 +168,13 @@ server configurations.
 # rm /etc/swift/object-server/4.conf
 ----
 
-Then go through each one of the remaining account, container, and object
-configuration files and change them as so:
-
-./etc/swift/account-server/1.conf:
-[source,conf]
-----
-[DEFAULT]
-devices = /srv/swift/hpss_meta
-mount_check = false
-disable_fallocate = true
-bind_ip = 127.0.0.1
-bind_port = 6012
-workers = 1
-user = swift
-log_facility = LOG_LOCAL2
-recon_cache_path = /var/cache/swift
-eventlet_debug = true
-
-[pipeline:main]
-pipeline = recon account-server
-
-[app:account-server]
-use = egg:swift#account
-
-[filter:recon]
-use = egg:swift#recon
-
-#[account-replicator]
-#vm_test_mode = yes
-
-#[account-auditor]
-
-#[account-reaper]
-----
-
-./etc/swift/container-server/1.conf
-[source,conf]
-----
-[DEFAULT]
-devices = /srv/swift/hpss_meta
-mount_check = false
-disable_fallocate = true
-bind_ip = 127.0.0.1
-bind_port = 6011
-workers = 1
-user = swift
-log_facility = LOG_LOCAL2
-recon_cache_path = /var/cache/swift
-eventlet_debug = true
-allow_versions = true
-
-[pipeline:main]
-pipeline = recon container-server
-
-[app:container-server]
-use = egg:swift#container
-
-[filter:recon]
-use = egg:swift#recon
-
-#[container-replicator]
-#vm_test_mode = yes
-
-#[container-updater]
-
-#[container-auditor]
-
-#[container-sync]
-----
+Then go through the object server config for SwiftOnHPSS and alter it like this:
 
 ./etc/swift/object-server/1.conf:
 [source,conf]
 ----
 [DEFAULT]
-devices = /srv/swift/hpss/.obfuscated
+hpss_swift_dir = /swift
 mount_check = false
 disable_fallocate = true
 bind_ip = 127.0.0.1
@@ -447,38 +313,13 @@ to fit the recommended configuration.
 cd /etc/swift
 rm -f *.builder *.ring.gz backups/*.builder backups/*.ring.gz
 swift-ring-builder object.builder create 0 1 1
-swift-ring-builder object.builder add r1z1-127.0.0.1:6010/.obfuscated 1
-#swift-ring-builder object.builder add r1z2-127.0.0.1:6020/sdb2 1
-#swift-ring-builder object.builder add r1z3-127.0.0.1:6030/sdb3 1
-#swift-ring-builder object.builder add r1z4-127.0.0.1:6040/sdb4 1
+swift-ring-builder object.builder add r1z1-127.0.0.1:6010/ 1
 swift-ring-builder object.builder rebalance
-#swift-ring-builder object-1.builder create 10 2 1
-#swift-ring-builder object-1.builder add r1z1-127.0.0.1:6010/sdb1 1
-#swift-ring-builder object-1.builder add r1z2-127.0.0.1:6020/sdb2 1
-#swift-ring-builder object-1.builder add r1z3-127.0.0.1:6030/sdb3 1
-#swift-ring-builder object-1.builder add r1z4-127.0.0.1:6040/sdb4 1
-#swift-ring-builder object-1.builder rebalance
-#swift-ring-builder object-2.builder create 10 6 1
-#swift-ring-builder object-2.builder add r1z1-127.0.0.1:6010/sdb1 1
-#swift-ring-builder object-2.builder add r1z1-127.0.0.1:6010/sdb5 1
-#swift-ring-builder object-2.builder add r1z2-127.0.0.1:6020/sdb2 1
-#swift-ring-builder object-2.builder add r1z2-127.0.0.1:6020/sdb6 1
-#swift-ring-builder object-2.builder add r1z3-127.0.0.1:6030/sdb3 1
-#swift-ring-builder object-2.builder add r1z3-127.0.0.1:6030/sdb7 1
-#swift-ring-builder object-2.builder add r1z4-127.0.0.1:6040/sdb4 1
-#swift-ring-builder object-2.builder add r1z4-127.0.0.1:6040/sdb8 1
-#swift-ring-builder object-2.builder rebalance
 swift-ring-builder container.builder create 0 1 1
 swift-ring-builder container.builder add r1z1-127.0.0.1:6011/metadata 1
-#swift-ring-builder container.builder add r1z2-127.0.0.1:6021/sdb2 1
-#swift-ring-builder container.builder add r1z3-127.0.0.1:6031/sdb3 1
-#swift-ring-builder container.builder add r1z4-127.0.0.1:6041/sdb4 1
 swift-ring-builder container.builder rebalance
 swift-ring-builder account.builder create 0 1 1
 swift-ring-builder account.builder add r1z1-127.0.0.1:6012/metadata 1
-#swift-ring-builder account.builder add r1z2-127.0.0.1:6022/sdb2 1
-#swift-ring-builder account.builder add r1z3-127.0.0.1:6032/sdb3 1
-#swift-ring-builder account.builder add r1z4-127.0.0.1:6042/sdb4 1
 swift-ring-builder account.builder rebalance
 ----
 
@@ -494,11 +335,17 @@ example configuration, so just copy it over.
 # service syslog restart
 ----
 
-Start up the Swift server, and make sure that it is accessible and works
+Next, in order to work around a known linking bug, it's necessary to
+preload the libtirpc library when starting up the Swift object server, or else
+SwiftOnHPSS will hang and then fail to connect to HPSS.
+
+One could just throw LD_PRELOAD=libtirpc.so in front of it and it'll probably work
+
+So, start up the Swift server, and make sure that it is accessible and works
 properly.
 
 ----
-# swift-init main start
+# LD_PRELOAD=libtirpc.so swift-init main start
 ----
 
 [[X6]]

@@ -64,5 +64,29 @@ network_chunk_size = 65536
 # This conf option will be deprecated and eventualy removed in future releases
 # read_pickled_metadata = off
 
+# Allow SwiftOnHPSS to purge lock files
+allow_purgelock = true
+
+# HPSS class of service ID to use
+default_cos_id = 1
+
+# Username of Swift service user in HPSS
+hpss_user = swift
+
+# Auth mechanism to use
+hpss_auth_mechanism = unix
+
+# Auth credential type to use
+hpss_auth_credential_type = keytab
+
+# Auth credential (for keytab, location of keytab file on local disk)
+hpss_auth_credential = "/var/hpss/etc/hpss.unix.keytab"
+
+# HPSS user id to write files as (setuid)
+hpss_uid = 300
+
+# HPSS group id to write files as (setgid)
+hpss_gid = 300
+
 [object-updater]
 user = <your-user-name>
