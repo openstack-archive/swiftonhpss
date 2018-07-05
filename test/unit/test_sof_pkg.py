@@ -48,7 +48,7 @@ class TestPkgInfo(unittest.TestCase):
             sc = os.path.join(td, 'saved_config.txt')
             pi.save_config(sc)
             exp = 'NAME=c\nVERSION=a\nRELEASE=b\n'
-            contents = file(sc, 'r').read()
+            contents = open(sc, 'r').read()
             assert contents == exp
         finally:
             shutil.rmtree(td)
